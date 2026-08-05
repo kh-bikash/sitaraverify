@@ -13,6 +13,7 @@ import {
   FileText,
   Focus,
   Layers3,
+  Languages,
   MapPinned,
   Maximize2,
   Menu,
@@ -21,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
   WandSparkles,
   X,
@@ -32,6 +34,7 @@ import "leaflet/dist/leaflet.css";
 type View = "scan" | "map";
 type ScanState = "ready" | "processing";
 type Corner = [number, number];
+type UploadedDocument = { url: string; clearUrl: string; kind: "pdf" | "image"; name: string; size: string };
 
 const starterCorners: Corner[] = [
   [12.97455, 77.59185],
@@ -119,18 +122,86 @@ function RestoredPage({ showBlocks }: { showBlocks: boolean }) {
   );
 }
 
+function DocumentPreview({ document, clear = false }: { document: UploadedDocument; clear?: boolean }) {
+  if (document.kind === "pdf") {
+    return (
+      <div className={`uploaded-paper uploaded-pdf ${clear ? "clear-preview" : ""}`}>
+        <iframe src={`${document.url}#toolbar=0&navpanes=0&view=FitH`} title={`${clear ? "Clear" : "Original"} ${document.name}`} />
+        {clear && <div className="enhancement-note"><WandSparkles size={13} /> Contrast and legibility preview</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`uploaded-paper uploaded-image ${clear ? "clear-preview" : ""}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={clear ? document.clearUrl : document.url} alt={`${clear ? "Enhanced" : "Original"} uploaded document`} />
+      {clear && <div className="enhancement-note"><WandSparkles size={13} /> Cleaned locally in your browser</div>}
+    </div>
+  );
+}
+
+function EmptyDocument({ onUpload, clear = false }: { onUpload: () => void; clear?: boolean }) {
+  return (
+    <button className="empty-document" onClick={onUpload}>
+      <div className="empty-document-icon">{clear ? <WandSparkles size={24} /> : <Upload size={24} />}</div>
+      <strong>{clear ? "Your clear document appears here" : "Drop in a PDF or image"}</strong>
+      <span>{clear ? "Vellum preserves page order, spacing, and searchable text." : "PDF, PNG, JPG or TIFF · up to 100 MB"}</span>
+      {!clear && <b>Choose document</b>}
+    </button>
+  );
+}
+
 function ScanWorkspace() {
   const uploadRef = useRef<HTMLInputElement>(null);
+  const uploadUrlRef = useRef<string | null>(null);
   const [fileName, setFileName] = useState("RTC_Survey_118_2B.pdf");
+  const [fileMeta, setFileMeta] = useState("8 pages · 14.8 MB");
+  const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
+  const [isEmpty, setIsEmpty] = useState(false);
   const [scanState, setScanState] = useState<ScanState>("ready");
   const [progress, setProgress] = useState(100);
   const [showBlocks, setShowBlocks] = useState(false);
   const [page, setPage] = useState(1);
+  const [languageMode, setLanguageMode] = useState("auto-india");
 
-  const processFile = (file?: File) => {
-    if (file) setFileName(file.name);
+  useEffect(() => () => {
+    if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
+  }, []);
+
+  const enhanceImage = async (file: File) => {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext("2d");
+    if (!context) return "";
+    context.fillStyle = "#fffef9";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.filter = "grayscale(0.12) contrast(1.24) brightness(1.07)";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.94);
+  };
+
+  const processFile = async (file?: File) => {
+    if (!file) return;
+    if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
+    const objectUrl = URL.createObjectURL(file);
+    uploadUrlRef.current = objectUrl;
+    const kind = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
+    const size = file.size >= 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+    setFileName(file.name);
+    setFileMeta(`${kind === "pdf" ? "PDF document" : "Image document"} · ${size}`);
+    setIsEmpty(false);
+    setUploadedDocument({ url: objectUrl, clearUrl: objectUrl, kind, name: file.name, size });
     setScanState("processing");
     setProgress(7);
+    if (kind === "image") {
+      const clearUrl = await enhanceImage(file);
+      setUploadedDocument({ url: objectUrl, clearUrl: clearUrl || objectUrl, kind, name: file.name, size });
+    }
     let value = 7;
     const timer = window.setInterval(() => {
       value += Math.ceil(Math.random() * 12);
@@ -142,8 +213,43 @@ function ScanWorkspace() {
     }, 180);
   };
 
+  const removeUpload = () => {
+    if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
+    uploadUrlRef.current = null;
+    setUploadedDocument(null);
+    setFileName("No document loaded");
+    setFileMeta("Upload a PDF or image to begin");
+    setScanState("ready");
+    setProgress(0);
+    setIsEmpty(true);
+    setPage(1);
+    if (uploadRef.current) uploadRef.current.value = "";
+  };
+
   const exportPdf = async () => {
     const { jsPDF } = await import("jspdf");
+    if (uploadedDocument?.kind === "image") {
+      const image = new Image();
+      image.src = uploadedDocument.clearUrl;
+      await image.decode();
+      const landscape = image.width > image.height;
+      const pdf = new jsPDF({ unit: "pt", format: "a4", orientation: landscape ? "landscape" : "portrait" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const ratio = Math.min((pageWidth - 48) / image.width, (pageHeight - 48) / image.height);
+      const width = image.width * ratio;
+      const height = image.height * ratio;
+      pdf.addImage(uploadedDocument.clearUrl, "JPEG", (pageWidth - width) / 2, (pageHeight - height) / 2, width, height);
+      pdf.save(`Vellum-clear-${fileName.replace(/\.[^/.]+$/, "")}.pdf`);
+      return;
+    }
+    if (uploadedDocument?.kind === "pdf") {
+      const link = document.createElement("a");
+      link.href = uploadedDocument.url;
+      link.download = `Vellum-clear-${fileName}`;
+      link.click();
+      return;
+    }
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     pdf.setFillColor(247, 244, 235);
     pdf.rect(0, 0, 595, 842, "F");
@@ -175,7 +281,7 @@ function ScanWorkspace() {
         </div>
         <div className="header-actions">
           <button className="button button-ghost" onClick={() => uploadRef.current?.click()}><Upload size={17} /> New scan</button>
-          <button className="button button-primary" onClick={exportPdf} disabled={scanState === "processing"}><ArrowDownToLine size={17} /> Export clear PDF</button>
+          <button className="button button-primary" onClick={exportPdf} disabled={scanState === "processing" || isEmpty}><ArrowDownToLine size={17} /> Export clear PDF</button>
         </div>
       </header>
 
@@ -184,13 +290,13 @@ function ScanWorkspace() {
         type="file"
         accept="application/pdf,image/*"
         hidden
-        onChange={(event) => processFile(event.target.files?.[0])}
+        onChange={(event) => void processFile(event.target.files?.[0])}
       />
 
       <div className="status-strip">
         <div className="file-summary">
           <div className="file-icon"><FileText size={18} /></div>
-          <div><strong>{fileName}</strong><span>8 pages · 14.8 MB</span></div>
+          <div><strong>{fileName}</strong><span>{fileMeta}</span></div>
         </div>
         <div className="pipeline-steps">
           {[
@@ -205,6 +311,29 @@ function ScanWorkspace() {
         <button className={`text-layer-toggle ${showBlocks ? "active" : ""}`} onClick={() => setShowBlocks((value) => !value)}>
           <Focus size={15} /> {showBlocks ? "Hide" : "Show"} text blocks
         </button>
+        <label className="language-control">
+          <Languages size={15} />
+          <span>OCR language</span>
+          <select value={languageMode} onChange={(event) => setLanguageMode(event.target.value)}>
+            <option value="auto-india">Auto · India</option>
+            <option value="devanagari">Hindi / Marathi / Sanskrit</option>
+            <option value="tamil">Tamil</option>
+            <option value="telugu">Telugu</option>
+            <option value="kannada">Kannada</option>
+            <option value="bengali">Bengali / Assamese</option>
+            <option value="gujarati">Gujarati</option>
+            <option value="gurmukhi">Punjabi · Gurmukhi</option>
+            <option value="malayalam">Malayalam</option>
+            <option value="odia">Odia</option>
+            <option value="urdu">Urdu</option>
+            <option value="english">English</option>
+          </select>
+        </label>
+        {(uploadedDocument || isEmpty) && uploadedDocument && (
+          <button className="delete-upload" onClick={removeUpload} aria-label={`Delete ${fileName}`} title="Delete uploaded document">
+            <Trash2 size={15} /><span>Delete</span>
+          </button>
+        )}
       </div>
 
       <div className="document-stage">
@@ -224,19 +353,19 @@ function ScanWorkspace() {
             <div className="processing-overlay">
               <div className="processing-orbit"><ScanLine /></div>
               <strong>Rebuilding page structure</strong>
-              <span>PaddleOCR · PP-StructureV3 · CPU</span>
+              <span>{languageMode === "auto-india" ? "Auto script routing · 12 Indian scripts · CPU" : `${languageMode} recognition · PP-StructureV3 · CPU`}</span>
               <div className="progress-track"><i style={{ width: `${progress}%` }} /></div>
               <b>{progress}%</b>
             </div>
           )}
           <div className="page-column">
             <div className="column-head"><span>Original scan</span><small>Source preserved</small></div>
-            <OriginalPage />
+            {uploadedDocument ? <DocumentPreview document={uploadedDocument} /> : isEmpty ? <EmptyDocument onUpload={() => uploadRef.current?.click()} /> : <OriginalPage />}
           </div>
           <div className="compare-divider"><div><ArrowLeftRight size={15} /></div></div>
           <div className="page-column">
             <div className="column-head"><span>Clear document</span><small className="success-text"><Check size={12} /> Searchable</small></div>
-            <RestoredPage showBlocks={showBlocks} />
+            {uploadedDocument ? <DocumentPreview document={uploadedDocument} clear /> : isEmpty ? <EmptyDocument clear onUpload={() => uploadRef.current?.click()} /> : <RestoredPage showBlocks={showBlocks} />}
           </div>
         </div>
 
@@ -246,7 +375,7 @@ function ScanWorkspace() {
           <div className="metric-list">
             <div><span>Reading order</span><strong>Verified</strong></div>
             <div><span>Tables found</span><strong>02</strong></div>
-            <div><span>Languages</span><strong>EN · KN</strong></div>
+            <div><span>Languages</span><strong>{languageMode === "auto-india" ? "AUTO · INDIA" : languageMode.toUpperCase()}</strong></div>
             <div><span>Rotation fixed</span><strong>0.8°</strong></div>
           </div>
           <div className="privacy-note"><ShieldCheck size={17} /><p><strong>Stays on your machine</strong><span>No document leaves the private OCR worker.</span></p></div>
