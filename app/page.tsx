@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { Map as LeafletMap, Polygon as LeafletPolygon } from "leaflet";
 import {
   AlertTriangle,
@@ -20,7 +21,6 @@ import {
   Layers3,
   Languages,
   LayoutDashboard,
-  Link2,
   MapPinned,
   Maximize2,
   Menu,
@@ -35,26 +35,52 @@ import {
   Upload,
   WandSparkles,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
-type View = "verification" | "scan" | "map";
-type ScanState = "ready" | "processing";
+type View = "verification" | "scan" | "map" | "records" | "processing" | "preferences" | "help";
+type ScanState = "ready" | "processing" | "error";
 type Corner = [number, number];
 type UploadedDocument = { url: string; clearUrl: string; kind: "pdf" | "image"; name: string; size: string };
 type VerificationStatus = "positive" | "refer" | "negative";
 
+type OcrLine = { text: string; confidence: number; box: number[]; reviewed?: boolean };
+type OcrLayoutBlock = { label: string; content: string; box: number[]; order?: number | null };
+type OcrPage = {
+  page: number;
+  width: number;
+  height: number;
+  lines: OcrLine[];
+  layout_blocks: OcrLayoutBlock[];
+  text: string;
+  confidence: number;
+};
+type OcrField = { label: string; value: string; type: string; confidence: number };
+type OcrResult = {
+  filename: string;
+  engine: string;
+  language: string;
+  warning?: string | null;
+  elapsed_seconds: number;
+  confidence: number;
+  line_count: number;
+  layout_block_count: number;
+  table_count: number;
+  fields: OcrField[];
+  text: string;
+  pages: OcrPage[];
+};
 type StoredDocument = {
   blob: Blob;
   name: string;
   type: string;
   lastModified: number;
+  ocrResult?: OcrResult;
 };
 
 const DOCUMENT_DB = "sitaara-private-documents";
 const DOCUMENT_STORE = "active-document";
+const OCR_API_URL = process.env.NEXT_PUBLIC_OCR_URL ?? "/api/ocr/gemini";
 
 function openDocumentDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -68,11 +94,11 @@ function openDocumentDatabase() {
   });
 }
 
-async function saveDocumentLocally(file: File) {
+async function saveDocumentLocally(file: File, ocrResult?: OcrResult) {
   const database = await openDocumentDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(DOCUMENT_STORE, "readwrite");
-    transaction.objectStore(DOCUMENT_STORE).put({ blob: file, name: file.name, type: file.type, lastModified: file.lastModified } satisfies StoredDocument, "current");
+    transaction.objectStore(DOCUMENT_STORE).put({ blob: file, name: file.name, type: file.type, lastModified: file.lastModified, ocrResult } satisfies StoredDocument, "current");
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -87,7 +113,15 @@ async function readLocalDocument() {
     request.onerror = () => reject(request.error);
   });
   database.close();
-  return record ? new File([record.blob], record.name, { type: record.type, lastModified: record.lastModified }) : null;
+  return record ? {
+    file: new File([record.blob], record.name, { type: record.type, lastModified: record.lastModified }),
+    ocrResult: record.ocrResult,
+  } : null;
+}
+
+async function saveOcrResultLocally(ocrResult: OcrResult) {
+  const stored = await readLocalDocument();
+  if (stored) await saveDocumentLocally(stored.file, ocrResult);
 }
 
 async function removeLocalDocument() {
@@ -115,8 +149,8 @@ const documentLines = [
   "Owner: A. Narayanappa",
   "Village: Sampigehalli     Hobli: Yelahanka",
   "Mutation reference: MR 42 / 2024-25",
-  "Boundaries: East — cart track; West — Survey 117",
-  "North — irrigation channel; South — Survey 119",
+  "Boundaries: East - cart track; West - Survey 117",
+  "North - irrigation channel; South - Survey 119",
 ];
 
 function BrandMark() {
@@ -129,11 +163,12 @@ function BrandMark() {
   );
 }
 
-function ConfidenceRing() {
+function ConfidenceRing({ confidence }: { confidence: number | null }) {
+  const percent = confidence === null ? 0 : Math.round(confidence * 1000) / 10;
   return (
-    <div className="confidence-ring" aria-label="OCR confidence 98.7 percent">
+    <div className="confidence-ring" style={{ "--confidence": `${percent}%` } as CSSProperties} aria-label={`OCR confidence ${percent} percent`}>
       <div>
-        <strong>98.7</strong>
+        <strong>{confidence === null ? "-" : percent.toFixed(1)}</strong>
         <span>confidence</span>
       </div>
     </div>
@@ -192,14 +227,20 @@ function PdfPagePreview({ document, page, clear, onPageCount }: { document: Uplo
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const onPageCountRef = useRef(onPageCount);
-  onPageCountRef.current = onPageCount;
+
+  useEffect(() => {
+    onPageCountRef.current = onPageCount;
+  }, [onPageCount]);
 
   useEffect(() => {
     let disposed = false;
     let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null;
-    setLoading(true);
-    setImageUrl(null);
-    setErrorMessage(null);
+    queueMicrotask(() => {
+      if (disposed) return;
+      setLoading(true);
+      setImageUrl(null);
+      setErrorMessage(null);
+    });
     void import("pdfjs-dist").then(async (pdfjs) => {
       if (disposed) return;
       // Keep the worker on the same origin so blob-backed local PDFs render in
@@ -281,6 +322,46 @@ function DocumentPreview({ document, page, clear = false, onPageCount }: { docum
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={clear ? document.clearUrl : document.url} alt={`${clear ? "Enhanced" : "Original"} uploaded document`} />
       {clear && <div className="enhancement-note"><WandSparkles size={13} /> Cleaned locally in your browser</div>}
+    </div>
+  );
+}
+
+function OcrReconstructedPage({ result, page, showBlocks, onLineChange, onConfirmLine }: { result: OcrResult; page: number; showBlocks: boolean; onLineChange: (pageNumber: number, lineIndex: number, value: string, reviewed?: boolean) => void; onConfirmLine: (pageNumber: number, lineIndex: number) => void }) {
+  const pageResult = result.pages.find((item) => item.page === page) ?? result.pages[0];
+  if (!pageResult) {
+    return <div className="ocr-empty"><FileText size={24} /><strong>No text detected</strong><span>Try another language model or a higher-resolution scan.</span></div>;
+  }
+
+  return (
+    <div className="ocr-paper ocr-typeset-paper" aria-label={`Reconstructed OCR text for page ${pageResult.page}`}>
+      <div className="ocr-paper-meta"><span>Clean typeset copy</span><strong>Page {pageResult.page}</strong></div>
+      <div className="ocr-flow-layer">
+        <header><span>Sitaara reconstructed document</span><strong>Page {pageResult.page} of {result.pages.length}</strong></header>
+        {pageResult.lines.map((line, index) => line.confidence < 0.68 ? (
+          <div className={`ocr-review-line ${showBlocks ? "blocks-visible" : ""} ${line.reviewed ? "reviewed" : ""}`} key={`${pageResult.page}-${index}`}>
+            <span>{line.reviewed ? <Check size={11} /> : <AlertTriangle size={11} />} {line.reviewed ? "Reviewed handwriting" : "Handwriting / unclear"} - {Math.round(line.confidence * 100)}%</span>
+            <textarea value={line.text} rows={Math.max(1, Math.ceil(line.text.length / 42))} onChange={(event) => onLineChange(pageResult.page, index, event.target.value)} onBlur={(event) => onLineChange(pageResult.page, index, event.target.value)} aria-label={`Correct uncertain text line ${index + 1}`} />
+            {!line.reviewed && <button className="confirm-correction" type="button" onClick={() => onConfirmLine(pageResult.page, index)}><Check size={12} /> Confirm correction</button>}
+          </div>
+        ) : (
+          <p className={`${showBlocks ? "blocks-visible" : ""} ${line.reviewed ? "reviewed" : ""}`} key={`${pageResult.page}-${index}`}>
+            {line.text}
+            {line.reviewed && <Check size={11} aria-label="Reviewed" />}
+          </p>
+        ))}
+      </div>
+      <div className="ocr-page-footer"><Check size={12} /> Clean reading order - {pageResult.lines.length} lines - confirm highlighted handwriting before export</div>
+    </div>
+  );
+}
+
+function OcrUnavailable({ message }: { message: string }) {
+  return (
+    <div className="ocr-empty ocr-error">
+      <AlertTriangle size={25} />
+      <strong>Gemini OCR is unavailable</strong>
+      <span>{message}</span>
+      <code>Set GEMINI_API_KEY on the server</code>
     </div>
   );
 }
@@ -367,23 +448,85 @@ function ResultBadge({ status, compact = false }: { status: VerificationStatus; 
   return <span className={`result-badge ${status} ${compact ? "compact" : ""}`}>{content.icon}{content.label}</span>;
 }
 
-function VerificationWorkspace() {
+function VerificationWorkspace({ onOpenDocumentLab, onOpenMap, onOpenRecords }: { onOpenDocumentLab: () => void; onOpenMap: () => void; onOpenRecords: () => void }) {
   const [running, setRunning] = useState(false);
   const [activeDetail, setActiveDetail] = useState("matrix");
   const [sourceProgress, setSourceProgress] = useState(100);
+  const [caseApproved, setCaseApproved] = useState(false);
+  const [resolvedRisks, setResolvedRisks] = useState<string[]>([]);
+  const [verificationMessage, setVerificationMessage] = useState("");
+  const [storedFile, setStoredFile] = useState<File | null>(null);
+  const [liveOcrResult, setLiveOcrResult] = useState<OcrResult | null>(null);
+  const [fieldDrafts, setFieldDrafts] = useState<OcrField[]>([]);
 
-  const rerun = () => {
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active && window.localStorage.getItem("sitaara-demo-case-approved") === "true") setCaseApproved(true);
+    });
+    readLocalDocument().then((stored) => {
+      if (!active || !stored) return;
+      setStoredFile(stored.file);
+      if (stored.ocrResult) {
+        setLiveOcrResult(stored.ocrResult);
+        setFieldDrafts(stored.ocrResult.fields);
+        setActiveDetail("extracted");
+      }
+    }).catch(() => setVerificationMessage("The saved document could not be restored. Open Document Lab and upload it again."));
+    return () => { active = false; };
+  }, []);
+
+  const rerun = async () => {
+    if (!storedFile) {
+      setVerificationMessage("Upload a PDF or image in Document Lab before re-running OCR.");
+      return;
+    }
     setRunning(true);
+    setVerificationMessage("Sending the saved document to Gemini for multilingual OCR…");
     setSourceProgress(8);
     let value = 8;
     const timer = window.setInterval(() => {
-      value += 11;
-      setSourceProgress(Math.min(value, 100));
-      if (value >= 100) {
-        window.clearInterval(timer);
-        setRunning(false);
-      }
-    }, 170);
+      value = Math.min(value + 4, 92);
+      setSourceProgress(value);
+    }, 900);
+    try {
+      const form = new FormData();
+      form.append("file", storedFile);
+      form.append("language", "auto-india");
+      const response = await fetch(OCR_API_URL, { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.detail || payload?.error || "OCR failed");
+      const result = payload as OcrResult;
+      await saveOcrResultLocally(result);
+      setLiveOcrResult(result);
+      setFieldDrafts(result.fields);
+      setVerificationMessage(`OCR refreshed with ${(result.confidence * 100).toFixed(1)}% confidence. Review the extracted fields before approval.`);
+      setActiveDetail("extracted");
+    } catch (error) {
+      setVerificationMessage(error instanceof Error ? error.message : "OCR could not be completed.");
+    } finally {
+      window.clearInterval(timer);
+      setSourceProgress(100);
+      setRunning(false);
+    }
+  };
+
+  const approveCase = () => {
+    setCaseApproved(true);
+    window.localStorage.setItem("sitaara-demo-case-approved", "true");
+    setVerificationMessage("Case marked reviewed and approved in this browser.");
+  };
+
+  const toggleRisk = (title: string) => {
+    setResolvedRisks((current) => current.includes(title) ? current.filter((item) => item !== title) : [...current, title]);
+  };
+
+  const saveReviewedFields = async () => {
+    if (!liveOcrResult) return;
+    const reviewed = { ...liveOcrResult, fields: fieldDrafts };
+    await saveOcrResultLocally(reviewed);
+    setLiveOcrResult(reviewed);
+    setVerificationMessage("Reviewed OCR fields saved with the uploaded document.");
   };
 
   const exportJson = () => {
@@ -489,21 +632,33 @@ function VerificationWorkspace() {
         <div><span>Last verified</span><strong>Just now</strong></div>
       </div>
 
+      {verificationMessage && <div className="verification-notice" role="status"><Check size={15} /><span>{verificationMessage}</span></div>}
+
       <div className="source-grid">
-        <article className="source-card"><div className="source-card-icon"><FileText size={19} /></div><div><span>Property document</span><strong>Sale deed · OCR complete</strong><small>Hindi + English · 21 fields extracted</small></div><ResultBadge status="positive" compact /></article>
-        <article className="source-card"><div className="source-card-icon"><Database size={19} /></div><div><span>Government record</span><strong>UP Bhulekh + BhuNaksha</strong><small>Khatauni and parcel matched · cached now</small></div><ResultBadge status="positive" compact /></article>
-        <article className="source-card"><div className="source-card-icon"><ScanLine size={19} /></div><div><span>Technical valuation</span><strong>TVR parsed · 9 site photos</strong><small>Field report dated 22 Jul 2026</small></div><ResultBadge status="positive" compact /></article>
+        <button type="button" className="source-card" onClick={() => liveOcrResult ? setActiveDetail("extracted") : onOpenDocumentLab()}><div className="source-card-icon"><FileText size={19} /></div><div><span>Property document</span><strong>{storedFile ? storedFile.name : "Open Document Lab"}</strong><small>{liveOcrResult ? `${liveOcrResult.fields.length} fields · ${(liveOcrResult.confidence * 100).toFixed(1)}% OCR confidence` : "Upload, OCR and review extracted fields"}</small></div><ChevronRight size={16} /></button>
+        <button type="button" className="source-card" onClick={onOpenRecords}><div className="source-card-icon"><Database size={19} /></div><div><span>Government record</span><strong>Open record workspace</strong><small>Review registry source and parcel reference</small></div><ChevronRight size={16} /></button>
+        <button type="button" className="source-card" onClick={onOpenMap}><div className="source-card-icon"><MapPinned size={19} /></div><div><span>Parcel evidence</span><strong>Open plot map</strong><small>Inspect boundary and coordinate evidence</small></div><ChevronRight size={16} /></button>
         {running && <div className="source-progress"><i style={{width:`${sourceProgress}%`}} /></div>}
       </div>
 
       <div className="verification-tabs" role="tablist">
-        {[['matrix','Comparison matrix'],['evidence','Evidence & map'],['risk','Risk flags']].map(([id,label]) => <button key={id} className={activeDetail === id ? "active" : ""} onClick={() => setActiveDetail(id)}>{label}</button>)}
+        {[['extracted','Extracted case data'],['matrix','Comparison matrix'],['evidence','Evidence & map'],['risk','Risk flags']].map(([id,label]) => <button key={id} className={activeDetail === id ? "active" : ""} onClick={() => setActiveDetail(id)}>{label}</button>)}
       </div>
+
+      {activeDetail === "extracted" && (
+        <div className="extracted-case-panel">
+          <div className="extracted-case-head"><div><h2>OCR evidence for verification</h2><p>{storedFile ? `${storedFile.name} · ${liveOcrResult?.engine ?? "waiting for OCR"}` : "No uploaded property document is available."}</p></div>{storedFile ? <button className="button button-ghost" onClick={onOpenDocumentLab}>View side by side</button> : <button className="button button-primary" onClick={onOpenDocumentLab}><Upload size={15} /> Upload document</button>}</div>
+          {fieldDrafts.length ? <>
+            <div className="verification-field-grid">{fieldDrafts.map((field, index) => <label key={`${field.label}-${index}`}><span>{field.label}<b>{Math.round(field.confidence * 100)}%</b></span><input value={field.value} onChange={(event) => setFieldDrafts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} /></label>)}</div>
+            <div className="field-review-actions"><p><ShieldAlert size={15} /> Confirm names, handwritten values and legal identifiers against the original scan.</p><button className="button button-primary" onClick={saveReviewedFields}><Check size={15} /> Save reviewed fields</button></div>
+          </> : <div className="verification-empty"><FileText size={26} /><strong>No OCR fields yet</strong><p>Upload a document in Document Lab, or use Re-run after a saved upload has been restored.</p><button className="button button-primary" onClick={onOpenDocumentLab}>Open Document Lab</button></div>}
+        </div>
+      )}
 
       {activeDetail === "matrix" && (
         <div className="verification-main-grid">
           <div className="matrix-panel">
-            <div className="matrix-heading"><div><h2>Three-source comparison</h2><p>Two independent checks per parameter, using the BRD tolerance rules.</p></div><div className="score-mini"><strong>90%</strong><span>verification score</span></div></div>
+            <div className="matrix-heading"><div><h2>Three-source comparison</h2><p>{liveOcrResult ? "OCR is live. Government and technical rows remain sample data until those connectors are configured." : "Demonstration of the BRD tolerance rules. Upload a document to begin a live case."}</p></div><div className="score-mini"><strong>90%</strong><span>demo score</span></div></div>
             <div className="matrix-scroll">
               <table className="verification-matrix">
                 <thead><tr><th>Parameter</th><th>Property document · OCR</th><th>Government portal</th><th>Doc vs portal</th><th>Technical valuation</th><th>Portal vs tech</th></tr></thead>
@@ -519,11 +674,11 @@ function VerificationWorkspace() {
             </div>
           </div>
           <aside className="decision-panel">
-            <div className="decision-top"><span>Aggregate decision</span><strong>HOLD</strong><p>Eight positive checks, two referrals, and no critical mismatches.</p></div>
+            <div className="decision-top"><span>Aggregate decision</span><strong>{caseApproved ? "APPROVED" : "HOLD"}</strong><p>{caseApproved ? "Analyst review completed and saved." : "Eight positive checks, two referrals, and no critical mismatches."}</p></div>
             <div className="decision-counts"><div className="positive"><b>08</b><span>Positive</span></div><div className="refer"><b>02</b><span>Refer</span></div><div className="negative"><b>00</b><span>Negative</span></div></div>
             <div className="review-reason"><AlertTriangle size={17} /><div><strong>Analyst review required</strong><span>Confirm the 2 ft access-width variance and cadastral centroid source.</span></div></div>
             <div className="decision-rule"><span>Decision rule</span><strong>Hold when ≥1 Refer and no Negative</strong></div>
-            <button className="approve-case"><CircleCheck size={16} /> Mark reviewed and approve</button>
+            <button className="approve-case" onClick={approveCase} disabled={caseApproved}><CircleCheck size={16} /> {caseApproved ? "Reviewed and approved" : "Mark reviewed and approve"}</button>
           </aside>
         </div>
       )}
@@ -540,7 +695,10 @@ function VerificationWorkspace() {
           ["Access width variance", "Field measurement is 2 ft wider than the registered deed", "refer"],
           ["Centroid-based coordinates", "Replace portal centroid with an authenticated survey point when available", "refer"],
           ["Mutation is recent", "Review the July mutation entry before final approval", "refer"],
-        ].map(([title,body,status],index)=><article className={`risk-item ${status}`} key={title}><span>{String(index+1).padStart(2,"0")}</span><div><strong>{title}</strong><p>{body}</p></div><ResultBadge status={status as VerificationStatus} compact /></article>)}</div>
+        ].map(([title,body,status],index)=>{
+          const resolved = resolvedRisks.includes(title);
+          return <article className={`risk-item ${resolved ? "resolved" : status}`} key={title}><span>{String(index+1).padStart(2,"0")}</span><div><strong>{title}</strong><p>{body}</p></div><button type="button" className="risk-action" onClick={() => toggleRisk(title)}>{resolved ? "Reopen" : "Resolve"}</button></article>;
+        })}</div>
       )}
     </section>
   );
@@ -550,19 +708,25 @@ function ScanWorkspace() {
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadUrlRef = useRef<string | null>(null);
   const processingTimerRef = useRef<number | null>(null);
-  const [fileName, setFileName] = useState("RTC_Survey_118_2B.pdf");
-  const [fileMeta, setFileMeta] = useState("8 pages · 14.8 MB");
+  const sourceFileRef = useRef<File | null>(null);
+  const ocrAbortRef = useRef<AbortController | null>(null);
+  const [fileName, setFileName] = useState("No document loaded");
+  const [fileMeta, setFileMeta] = useState("Upload a PDF or image to begin");
   const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
-  const [isEmpty, setIsEmpty] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(true);
   const [scanState, setScanState] = useState<ScanState>("ready");
-  const [progress, setProgress] = useState(100);
+  const [progress, setProgress] = useState(0);
   const [showBlocks, setShowBlocks] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageCount, setPageCount] = useState(8);
+  const [pageCount, setPageCount] = useState(0);
   const [languageMode, setLanguageMode] = useState("auto-india");
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
+  const [ocrError, setOcrError] = useState("");
+  const [showExtraction, setShowExtraction] = useState(false);
 
   useEffect(() => () => {
     if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
+    ocrAbortRef.current?.abort();
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
   }, []);
 
@@ -582,14 +746,15 @@ function ScanWorkspace() {
     return canvas.toDataURL("image/jpeg", 0.94);
   };
 
-  const processFile = async (file?: File, options: { persist?: boolean; animate?: boolean } = {}) => {
+  const processFile = async (file?: File, options: { persist?: boolean; existingResult?: OcrResult; language?: string } = {}) => {
     if (!file) return;
     const persist = options.persist ?? true;
-    const animate = options.animate ?? true;
     if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
+    ocrAbortRef.current?.abort();
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
     const objectUrl = URL.createObjectURL(file);
     uploadUrlRef.current = objectUrl;
+    sourceFileRef.current = file;
     const kind = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
     const size = file.size >= 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
     setFileName(file.name);
@@ -598,35 +763,66 @@ function ScanWorkspace() {
     setPage(1);
     setPageCount(kind === "pdf" ? 1 : 1);
     setUploadedDocument({ url: objectUrl, clearUrl: objectUrl, kind, name: file.name, size });
-    setScanState(animate ? "processing" : "ready");
-    setProgress(animate ? 7 : 100);
+    setOcrError("");
     if (persist) {
       window.localStorage.removeItem("sitaara-document-empty");
-      void saveDocumentLocally(file).catch(() => undefined);
+      await saveDocumentLocally(file).catch(() => undefined);
     }
     if (kind === "image") {
       const clearUrl = await enhanceImage(file);
       setUploadedDocument({ url: objectUrl, clearUrl: clearUrl || objectUrl, kind, name: file.name, size });
     }
-    if (!animate) return;
-    let value = 7;
-    const timer = window.setInterval(() => {
-      value += Math.ceil(Math.random() * 12);
-      setProgress(Math.min(value, 100));
-      if (value >= 100) {
-        window.clearInterval(timer);
-        processingTimerRef.current = null;
-        setScanState("ready");
+    if (options.existingResult) {
+      setOcrResult(options.existingResult);
+      setPageCount(options.existingResult.pages.length || 1);
+      setScanState("ready");
+      setProgress(100);
+      return;
+    }
+
+    setOcrResult(null);
+    setScanState("processing");
+    setProgress(4);
+    let value = 4;
+    processingTimerRef.current = window.setInterval(() => {
+      value = Math.min(92, value + (value < 45 ? 4 : value < 75 ? 2 : 1));
+      setProgress(value);
+    }, 650);
+
+    const controller = new AbortController();
+    ocrAbortRef.current = controller;
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    formData.append("language", options.language ?? languageMode);
+    try {
+      const response = await fetch(OCR_API_URL, { method: "POST", body: formData, signal: controller.signal });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(failure?.detail ?? `OCR API returned ${response.status}`);
       }
-    }, 180);
-    processingTimerRef.current = timer;
+      const result = await response.json() as OcrResult;
+      setOcrResult(result);
+      setPageCount(result.pages.length || 1);
+      setProgress(100);
+      setScanState("ready");
+      await saveOcrResultLocally(result).catch(() => undefined);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setScanState("error");
+      setProgress(0);
+      setOcrError(error instanceof Error ? error.message : "Unable to run Gemini OCR.");
+    } finally {
+      if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
+      processingTimerRef.current = null;
+      if (ocrAbortRef.current === controller) ocrAbortRef.current = null;
+    }
   };
 
   useEffect(() => {
     let cancelled = false;
-    void readLocalDocument().then((file) => {
+    void readLocalDocument().then((stored) => {
       if (cancelled) return;
-      if (file) return processFile(file, { persist: false, animate: false });
+      if (stored) return processFile(stored.file, { persist: false, existingResult: stored.ocrResult });
       if (window.localStorage.getItem("sitaara-document-empty") === "true") setIsEmpty(true);
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -637,9 +833,15 @@ function ScanWorkspace() {
   const removeUpload = () => {
     if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
     processingTimerRef.current = null;
+    ocrAbortRef.current?.abort();
+    ocrAbortRef.current = null;
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
     uploadUrlRef.current = null;
     setUploadedDocument(null);
+    sourceFileRef.current = null;
+    setOcrResult(null);
+    setOcrError("");
+    setShowExtraction(false);
     setFileName("No document loaded");
     setFileMeta("Upload a PDF or image to begin");
     setScanState("ready");
@@ -652,30 +854,48 @@ function ScanWorkspace() {
     if (uploadRef.current) uploadRef.current.value = "";
   };
 
+  const updateOcrLine = (pageNumber: number, lineIndex: number, value: string, reviewed = false) => {
+    if (!ocrResult) return;
+    const pages = ocrResult.pages.map((pageResult) => {
+      if (pageResult.page !== pageNumber) return pageResult;
+      const lines = pageResult.lines.map((line, index) => index === lineIndex
+        ? { ...line, text: value, reviewed: reviewed || line.reviewed }
+        : line);
+      return { ...pageResult, lines, text: lines.map((line) => line.text).join("\n") };
+    });
+    const nextResult = {
+      ...ocrResult,
+      pages,
+      text: pages.map((pageResult) => pageResult.text).join("\n\n"),
+    };
+    setOcrResult(nextResult);
+    if (reviewed) void saveOcrResultLocally(nextResult).catch(() => undefined);
+  };
+
+  const confirmOcrLine = (pageNumber: number, lineIndex: number) => {
+    const pageResult = ocrResult?.pages.find((item) => item.page === pageNumber);
+    const line = pageResult?.lines[lineIndex];
+    if (!pageResult || !line) return;
+    updateOcrLine(pageNumber, lineIndex, line.text, true);
+  };
+
   const exportPdf = async () => {
+    if (ocrResult) {
+      const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character] ?? character);
+      const pages = ocrResult.pages.map((pageResult) => {
+        const lines = pageResult.lines.map((line) => {
+          const reviewClass = line.confidence < 0.68 && !line.reviewed ? " class=\"needs-review\"" : "";
+          return `<p${reviewClass}>${escapeHtml(line.text)}</p>`;
+        }).join("");
+        return `<section class="page"><header><span>Sitaara Verify</span><strong>Clean searchable copy</strong></header><main>${lines}</main><footer>Reconstructed with Gemini OCR · page ${pageResult.page}</footer></section>`;
+      }).join("");
+      const printWindow = window.open("about:blank", "_blank");
+      if (!printWindow) return;
+      printWindow.document.write(`<!doctype html><html lang="hi"><head><title>Sitaara clear · ${escapeHtml(fileName)}</title><style>@page{size:A4;margin:0}*{box-sizing:border-box}body{margin:0;background:#dfe2dc;font-family:"Nirmala UI","Mangal","Noto Sans Devanagari",sans-serif;color:#172019}.page{width:210mm;min-height:297mm;background:white;padding:16mm 18mm 18mm;position:relative;page-break-after:always}.page header{display:flex;justify-content:space-between;padding-bottom:5mm;border-bottom:1px solid #cbd5ce;color:#315e4c;font-size:8pt;text-transform:uppercase;letter-spacing:.08em}.page main{padding:10mm 0 15mm}.page p{margin:0 0 3mm;font-size:11pt;line-height:1.55;white-space:pre-wrap}.page p.needs-review{padding:2mm 3mm;background:#fff4df;border-left:1mm solid #c67a39}.page footer{position:absolute;bottom:8mm;left:18mm;color:#657068;font-size:7pt}@media print{body{background:white}.page{margin:0}}</style></head><body>${pages}<script>window.onload=()=>setTimeout(()=>window.print(),300)<\/script></body></html>`);
+      printWindow.document.close();
+      return;
+    }
     const { jsPDF } = await import("jspdf");
-    if (uploadedDocument?.kind === "image") {
-      const image = new Image();
-      image.src = uploadedDocument.clearUrl;
-      await image.decode();
-      const landscape = image.width > image.height;
-      const pdf = new jsPDF({ unit: "pt", format: "a4", orientation: landscape ? "landscape" : "portrait" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const ratio = Math.min((pageWidth - 48) / image.width, (pageHeight - 48) / image.height);
-      const width = image.width * ratio;
-      const height = image.height * ratio;
-      pdf.addImage(uploadedDocument.clearUrl, "JPEG", (pageWidth - width) / 2, (pageHeight - height) / 2, width, height);
-      pdf.save(`Vellum-clear-${fileName.replace(/\.[^/.]+$/, "")}.pdf`);
-      return;
-    }
-    if (uploadedDocument?.kind === "pdf") {
-      const link = document.createElement("a");
-      link.href = uploadedDocument.url;
-      link.download = `Vellum-clear-${fileName}`;
-      link.click();
-      return;
-    }
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     pdf.setFillColor(247, 244, 235);
     pdf.rect(0, 0, 595, 842, "F");
@@ -698,17 +918,25 @@ function ScanWorkspace() {
     pdf.save(`Vellum-restored-${fileName.replace(/\.[^/.]+$/, "")}.pdf`);
   };
 
+  const changeLanguage = (nextLanguage: string) => {
+    setLanguageMode(nextLanguage);
+    if (sourceFileRef.current) void processFile(sourceFileRef.current, { persist: true, language: nextLanguage });
+  };
+
+  const unresolvedReviewCount = ocrResult?.pages.reduce((count, pageResult) => count + pageResult.lines.filter((line) => line.confidence < 0.68 && !line.reviewed).length, 0) ?? 0;
+  const reviewedHandwritingCount = ocrResult?.pages.reduce((count, pageResult) => count + pageResult.lines.filter((line) => line.confidence < 0.68 && line.reviewed).length, 0) ?? 0;
+
   return (
     <section className="workspace-section" aria-labelledby="scan-title">
       <header className="workspace-header">
         <div>
-          <div className="eyebrow"><span className="live-dot" /> Private CPU workspace</div>
+          <div className="eyebrow"><span className="live-dot" /> Multilingual document intelligence</div>
           <h1 id="scan-title">Restore every detail.<br /><em>Keep the document true.</em></h1>
         </div>
         <div className="header-actions">
           <button className="button button-ghost" onClick={() => uploadRef.current?.click()}><Upload size={17} /> New scan</button>
           {!isEmpty && <button className="button button-danger" type="button" onClick={removeUpload}><Trash2 size={17} /> Delete document</button>}
-          <button className="button button-primary" onClick={exportPdf} disabled={scanState === "processing" || isEmpty}><ArrowDownToLine size={17} /> Export clear PDF</button>
+          <button className="button button-primary" onClick={exportPdf} disabled={scanState === "processing" || isEmpty || (!!uploadedDocument && !ocrResult)}><ArrowDownToLine size={17} /> Export clear PDF</button>
         </div>
       </header>
 
@@ -727,12 +955,12 @@ function ScanWorkspace() {
         </div>
         <div className="pipeline-steps">
           {[
-            ["Deskewed", "0.8°"],
-            ["Layout", "42 blocks"],
-            ["Text", "98.7%"],
-            ["PDF/A", "Ready"],
+            ["Engine", ocrResult ? ocrResult.engine : scanState === "processing" ? "Gemini" : "-"],
+            ["Layout", ocrResult ? `${ocrResult.layout_block_count} blocks` : scanState === "processing" ? "Analysing" : "-"],
+            ["Text", ocrResult ? `${(ocrResult.confidence * 100).toFixed(1)}%` : scanState === "processing" ? "Extracting" : "-"],
+            ["OCR", ocrResult ? `${ocrResult.line_count} lines` : scanState === "error" ? "Worker offline" : "Pending"],
           ].map(([label, value]) => (
-            <div key={label}><Check size={13} /><span>{label}</span><strong>{value}</strong></div>
+            <div key={label}>{ocrResult ? <Check size={13} /> : <RefreshCw size={13} className={scanState === "processing" ? "spin-icon" : ""} />}<span>{label}</span><strong>{value}</strong></div>
           ))}
         </div>
         <button className={`text-layer-toggle ${showBlocks ? "active" : ""}`} onClick={() => setShowBlocks((value) => !value)}>
@@ -741,7 +969,7 @@ function ScanWorkspace() {
         <label className="language-control">
           <Languages size={15} />
           <span>OCR language</span>
-          <select value={languageMode} onChange={(event) => setLanguageMode(event.target.value)}>
+          <select value={languageMode} onChange={(event) => changeLanguage(event.target.value)}>
             <option value="auto-india">Auto · India</option>
             <option value="devanagari">Hindi / Marathi / Sanskrit</option>
             <option value="tamil">Tamil</option>
@@ -772,15 +1000,15 @@ function ScanWorkspace() {
               <span>{String(item).padStart(2, "0")}</span>
             </button>
           ))}
-          {pageCount > 4 && <button className="more-pages">+{pageCount - 4}</button>}
+          {pageCount > 4 && <button className="more-pages" onClick={() => setPage(5)}>+{pageCount - 4}</button>}
         </aside>
 
         <div className="comparison-area">
           {scanState === "processing" && (
             <div className="processing-overlay">
               <div className="processing-orbit"><ScanLine /></div>
-              <strong>Rebuilding page structure</strong>
-              <span>{languageMode === "auto-india" ? "Auto script routing · 12 Indian scripts · CPU" : `${languageMode} recognition · PP-StructureV3 · CPU`}</span>
+              <strong>Extracting real text and page structure</strong>
+              <span>{languageMode === "auto-india" ? "Indian scripts + English · Gemini multimodal OCR" : `${languageMode} recognition · Gemini multimodal OCR`}</span>
               <div className="progress-track"><i style={{ width: `${progress}%` }} /></div>
               <b>{progress}%</b>
             </div>
@@ -791,22 +1019,34 @@ function ScanWorkspace() {
           </div>
           <div className="compare-divider"><div><ArrowLeftRight size={15} /></div></div>
           <div className="page-column">
-            <div className="column-head"><span>Clear document</span><small className="success-text"><Check size={12} /> Searchable</small></div>
-            {uploadedDocument ? <DocumentPreview document={uploadedDocument} page={page} clear onPageCount={(count) => { setPageCount(count); setFileMeta(`${count} page${count === 1 ? "" : "s"} · ${uploadedDocument.size}`); }} /> : isEmpty ? <EmptyDocument clear onUpload={() => uploadRef.current?.click()} /> : <RestoredPage showBlocks={showBlocks} />}
+            <div className="column-head"><span>Reconstructed text</span><small className={ocrResult ? "success-text" : ""}>{ocrResult ? <><Check size={12} /> Searchable</> : scanState === "error" ? "Needs worker" : "Waiting for OCR"}</small></div>
+            {uploadedDocument ? (
+              ocrResult ? <OcrReconstructedPage result={ocrResult} page={page} showBlocks={showBlocks} onLineChange={updateOcrLine} onConfirmLine={confirmOcrLine} /> : scanState === "error" ? <OcrUnavailable message={ocrError} /> : <div className="ocr-empty"><ScanLine size={25} /><strong>Extracting document</strong><span>The reconstructed page will contain real OCR text, not a duplicate image.</span></div>
+            ) : isEmpty ? <EmptyDocument clear onUpload={() => uploadRef.current?.click()} /> : <RestoredPage showBlocks={showBlocks} />}
           </div>
         </div>
 
         <aside className="inspector">
           <div className="inspector-head"><span>Document health</span><Sparkles size={16} /></div>
-          <ConfidenceRing />
+          <ConfidenceRing confidence={ocrResult?.confidence ?? null} />
           <div className="metric-list">
-            <div><span>Reading order</span><strong>Verified</strong></div>
-            <div><span>Tables found</span><strong>02</strong></div>
-            <div><span>Languages</span><strong>{languageMode === "auto-india" ? "AUTO · INDIA" : languageMode.toUpperCase()}</strong></div>
-            <div><span>Rotation fixed</span><strong>0.8°</strong></div>
+            <div><span>Reading order</span><strong>{ocrResult ? "Detected" : "-"}</strong></div>
+            <div><span>Tables found</span><strong>{ocrResult?.table_count ?? "-"}</strong></div>
+            <div><span>Languages</span><strong>{ocrResult?.language ?? (languageMode === "auto-india" ? "AUTO · INDIA" : languageMode.toUpperCase())}</strong></div>
+            <div><span>Processing</span><strong>{ocrResult ? `${ocrResult.elapsed_seconds}s` : "-"}</strong></div>
+            <div><span>Handwriting review</span><strong className={unresolvedReviewCount ? "review-needed" : "review-complete"}>{ocrResult ? (unresolvedReviewCount ? `${unresolvedReviewCount} remaining` : reviewedHandwritingCount ? "Complete" : "None flagged") : "-"}</strong></div>
           </div>
-          <div className="privacy-note"><ShieldCheck size={17} /><p><strong>Stays on your machine</strong><span>No document leaves the private OCR worker.</span></p></div>
-          <button className="inspector-link">Review extracted fields <ChevronRight size={15} /></button>
+          <div className="privacy-note"><ShieldCheck size={17} /><p><strong>Protected server-side key</strong><span>The document is sent to Google Gemini for OCR; the API key never reaches the browser.</span></p></div>
+          {ocrResult?.warning && <div className="ocr-warning"><AlertTriangle size={14} /><span>{ocrResult.warning}</span></div>}
+          <button className={`inspector-link ${showExtraction ? "open" : ""}`} onClick={() => setShowExtraction((value) => !value)}>Review extracted fields <ChevronRight size={15} /></button>
+          {showExtraction && (
+            <div className="extraction-panel">
+              {ocrResult?.fields.length ? ocrResult.fields.map((field) => (
+                <div className="extracted-field" key={`${field.type}-${field.value}`}><span>{field.label}</span><strong>{field.value}</strong><small>{Math.round(field.confidence * 100)}% source confidence</small></div>
+              )) : <p className="no-fields">No structured property field matched confidently. Raw OCR text is still available below.</p>}
+              {ocrResult && <div className="raw-ocr-text"><span>Raw OCR · page {page}</span>{(ocrResult.pages.find((item) => item.page === page)?.lines ?? []).map((line, index) => <p key={`${index}-${line.text}`}><b>{Math.round(line.confidence * 100)}%</b>{line.text}</p>)}</div>}
+            </div>
+          )}
         </aside>
       </div>
     </section>
@@ -818,7 +1058,12 @@ function ParcelMap({ opacity, corners, onCornerChange }: { opacity: number; corn
   const mapRef = useRef<LeafletMap | null>(null);
   const polygonRef = useRef<LeafletPolygon | null>(null);
   const callbackRef = useRef(onCornerChange);
-  callbackRef.current = onCornerChange;
+  const initialCornersRef = useRef(corners);
+  const initialOpacityRef = useRef(opacity);
+
+  useEffect(() => {
+    callbackRef.current = onCornerChange;
+  }, [onCornerChange]);
 
   useEffect(() => {
     if (!mapElement.current || mapRef.current) return;
@@ -831,9 +1076,9 @@ function ParcelMap({ opacity, corners, onCornerChange }: { opacity: number; corn
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(map);
       L.control.zoom({ position: "bottomright" }).addTo(map);
-      const polygon = L.polygon(corners, { color: "#e8ff86", weight: 3, fillColor: "#486857", fillOpacity: opacity }).addTo(map);
+      const polygon = L.polygon(initialCornersRef.current, { color: "#e8ff86", weight: 3, fillColor: "#486857", fillOpacity: initialOpacityRef.current }).addTo(map);
       polygon.bindTooltip("Khasra 214/3 · 1,856 sq.ft", { permanent: true, direction: "center", className: "parcel-label" });
-      corners.forEach((corner, index) => {
+      initialCornersRef.current.forEach((corner, index) => {
         const marker = L.marker(corner, {
           draggable: true,
           icon: L.divIcon({ className: "corner-marker", html: `<span>${index + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
@@ -871,14 +1116,51 @@ function MapWorkspace() {
   const [located, setLocated] = useState(true);
   const [surveyNumber, setSurveyNumber] = useState("214/3");
   const [recordOpen, setRecordOpen] = useState(true);
+  const [mapMessage, setMapMessage] = useState("");
+  const geoJsonRef = useRef<HTMLInputElement>(null);
 
   const locate = () => {
     setLocated(false);
-    window.setTimeout(() => setLocated(true), 650);
+    setMapMessage("Matching the plot reference…");
+    window.setTimeout(() => {
+      setLocated(true);
+      setRecordOpen(true);
+      setMapMessage(`Survey ${surveyNumber || "reference"} located on the provisional overlay.`);
+    }, 650);
   };
 
   const updateCorner = (index: number, point: Corner) => {
     setCorners((current) => current.map((corner, cornerIndex) => cornerIndex === index ? point : corner));
+  };
+
+  const importGeoJson = async (file?: File) => {
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const geometry = data.type === "FeatureCollection" ? data.features?.[0]?.geometry : data.type === "Feature" ? data.geometry : data;
+      const ring = geometry?.type === "Polygon" ? geometry.coordinates?.[0] : null;
+      if (!Array.isArray(ring) || ring.length < 4) throw new Error("Use a GeoJSON Polygon with at least four points.");
+      const imported = ring.slice(0, 4).map((coordinate: number[]) => [Number(coordinate[1]), Number(coordinate[0])] as Corner);
+      if (imported.some((point: Corner) => !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) throw new Error("The polygon coordinates are invalid.");
+      setCorners(imported);
+      setMapMessage(`Imported ${file.name} with four boundary points.`);
+    } catch (error) {
+      setMapMessage(error instanceof Error ? error.message : "GeoJSON could not be imported.");
+    } finally {
+      if (geoJsonRef.current) geoJsonRef.current.value = "";
+    }
+  };
+
+  const exportBoundary = () => {
+    const coordinates = [...corners.map(([lat, lng]) => [lng, lat]), [corners[0][1], corners[0][0]]];
+    const geojson = { type: "Feature", properties: { surveyNumber, status: "provisional" }, geometry: { type: "Polygon", coordinates: [coordinates] } };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(geojson, null, 2)], { type: "application/geo+json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `survey-${surveyNumber.replace(/[^a-z0-9-]/gi, "-") || "boundary"}.geojson`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setMapMessage("Boundary exported as GeoJSON.");
   };
 
   return (
@@ -889,8 +1171,9 @@ function MapWorkspace() {
           <h1 id="map-title">Find the record.<br /><em>Trace the truth on land.</em></h1>
         </div>
         <div className="header-actions">
-          <button className="button button-ghost"><Layers3 size={17} /> Import GeoJSON</button>
-          <button className="button button-primary"><ArrowDownToLine size={17} /> Export boundary</button>
+          <input ref={geoJsonRef} type="file" accept=".json,.geojson,application/geo+json,application/json" hidden onChange={(event) => importGeoJson(event.target.files?.[0])} />
+          <button className="button button-ghost" onClick={() => geoJsonRef.current?.click()}><Layers3 size={17} /> Import GeoJSON</button>
+          <button className="button button-primary" onClick={exportBoundary}><ArrowDownToLine size={17} /> Export boundary</button>
         </div>
       </header>
 
@@ -904,6 +1187,7 @@ function MapWorkspace() {
           </div>
           <label>District<input defaultValue="Varanasi" /></label>
           <button className="button button-primary locate-button" onClick={locate}><Search size={17} /> {located ? "Locate plot" : "Matching record…"}</button>
+          {mapMessage && <div className="map-message" role="status">{mapMessage}</div>}
           <div className="source-note"><CircleHelp size={16} /><p><strong>Registry-aware, map-safe</strong><span>OpenStreetMap is the basemap. Legal parcel geometry must come from a survey record, GeoJSON, or confirmed corner points.</span></p></div>
           {recordOpen && located && (
             <div className="matched-record">
@@ -920,7 +1204,7 @@ function MapWorkspace() {
           <ParcelMap opacity={opacity} corners={corners} onCornerChange={updateCorner} />
           <div className="map-floating-top">
             <div><Focus size={15} /><span>Drag numbered corners to align</span></div>
-            <button aria-label="Full screen map"><Maximize2 size={16} /></button>
+            <button aria-label="Full screen map" onClick={() => document.querySelector<HTMLElement>(".map-canvas-wrap")?.requestFullscreen?.()}><Maximize2 size={16} /></button>
           </div>
           <div className="map-legend">
             <span className="legend-swatch" />
@@ -940,14 +1224,62 @@ function MapWorkspace() {
             ))}
           </div>
           <div className="quality-card"><BadgeCheck size={17} /><div><strong>Overlay quality: High</strong><span>4 control points · ±1.8 m estimated</span></div></div>
-          <button className="inspector-link">Open legal record <ChevronRight size={15} /></button>
+          <button className="inspector-link" onClick={() => { setRecordOpen(true); setMapMessage("Matched record opened in the plot search panel."); }}>Open legal record <ChevronRight size={15} /></button>
         </aside>
       </div>
     </section>
   );
 }
 
+function UtilityWorkspace({ view, onNavigate }: { view: Exclude<View, "verification" | "scan" | "map">; onNavigate: (view: View) => void }) {
+  const [preferences, setPreferences] = useState({ autoSave: true, confidenceReview: true, compactRows: false });
+  const content = {
+    records: {
+      eyebrow: "Evidence register",
+      title: "Property records",
+      intro: "Open a case source, continue its verification, or inspect the mapped parcel.",
+    },
+    processing: {
+      eyebrow: "Live operations",
+      title: "Processing queue",
+      intro: "Track OCR and verification jobs without losing the document you are reviewing.",
+    },
+    preferences: {
+      eyebrow: "Workspace controls",
+      title: "Preferences",
+      intro: "Choose how documents and low-confidence OCR are handled in this browser.",
+    },
+    help: {
+      eyebrow: "Operator guide",
+      title: "Help center",
+      intro: "Follow the property-verification workflow from scan to final decision.",
+    },
+  }[view];
+
+  return (
+    <section className="utility-workspace" aria-labelledby="utility-title">
+      <header className="utility-header"><div className="eyebrow">{content.eyebrow}</div><h1 id="utility-title">{content.title}</h1><p>{content.intro}</p></header>
+      {view === "records" && <div className="utility-grid">
+        {["SHFL0021847", "OCR-AJAI-ATS", "PV-2026-0412"].map((id, index) => <article className="utility-card" key={id}><span>{index === 1 ? "Uploaded OCR" : "Verification case"}</span><h2>{id}</h2><p>{index === 1 ? "Ajai ATS · Hindi property agreement" : index === 0 ? "Meera Sharma · Khasra 214/3" : "Registry review awaiting documents"}</p><div><button className="button button-primary" onClick={() => onNavigate(index === 1 ? "scan" : "verification")}>Open case</button><button className="button button-ghost" onClick={() => onNavigate("map")}>View map</button></div></article>)}
+      </div>}
+      {view === "processing" && <div className="queue-list">
+        {[['OCR-AJAI-ATS','OCR complete','100%'],['SHFL0021847','Sources compared','100%'],['PV-2026-0412','Waiting for upload','0%']].map(([id,label,value]) => <article key={id}><div><span>{id}</span><strong>{label}</strong></div><div className="queue-progress"><i style={{ width: value }} /></div><b>{value}</b><button className="button button-ghost" onClick={() => onNavigate(id === 'OCR-AJAI-ATS' ? 'scan' : 'verification')}>Open</button></article>)}
+      </div>}
+      {view === "preferences" && <div className="preference-panel">
+        <label><div><strong>Save the active upload</strong><span>Restore the PDF and OCR result after refresh.</span></div><input type="checkbox" checked={preferences.autoSave} onChange={(event) => setPreferences((value) => ({ ...value, autoSave: event.target.checked }))} /></label>
+        <label><div><strong>Require confidence review</strong><span>Keep uncertain handwriting in the analyst queue.</span></div><input type="checkbox" checked={preferences.confidenceReview} onChange={(event) => setPreferences((value) => ({ ...value, confidenceReview: event.target.checked }))} /></label>
+        <label><div><strong>Compact comparison rows</strong><span>Show more verification parameters on screen.</span></div><input type="checkbox" checked={preferences.compactRows} onChange={(event) => setPreferences((value) => ({ ...value, compactRows: event.target.checked }))} /></label>
+        <button className="button button-primary" onClick={() => window.localStorage.setItem("sitaara-preferences", JSON.stringify(preferences))}><Check size={16} /> Save preferences</button>
+      </div>}
+      {view === "help" && <div className="help-steps">
+        {[['01','Upload and read','Use Document Lab to upload a PDF or image and run multilingual OCR.','scan'],['02','Compare evidence','Review extracted fields and resolve verification referrals.','verification'],['03','Confirm the parcel','Use the plot map only with authoritative boundary coordinates.','map']].map(([number,title,body,target]) => <button key={number} onClick={() => onNavigate(target as View)}><span>{number}</span><div><strong>{title}</strong><p>{body}</p></div><ChevronRight size={18} /></button>)}
+      </div>}
+    </section>
+  );
+}
+
 function UpgradeModal({ onClose }: { onClose: () => void }) {
+  const [configured, setConfigured] = useState(false);
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Upgrade plan">
       <div className="upgrade-modal">
@@ -956,7 +1288,7 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
         <div className="plan-card">
           <div className="plan-price"><span>Production controls</span><strong>500+<small> concurrent cases</small></strong></div>
           {["State portal connector registry", "24-hour evidence cache", "PII-masked audit trail", "SFTP and S3 report delivery"].map((item) => <div className="plan-feature" key={item}><Check size={15} />{item}</div>)}
-          <button className="button button-primary">Configure deployment</button>
+          <button className="button button-primary" onClick={() => { setConfigured(true); window.localStorage.setItem("sitaara-production-configured", "true"); }}>{configured ? <Check size={15} /> : null}{configured ? "Configuration saved" : "Configure deployment"}</button>
           <small>Secrets-manager ready · Role-based access</small>
         </div>
       </div>
@@ -972,8 +1304,10 @@ export default function Home() {
 
   useEffect(() => {
     const savedView = window.localStorage.getItem("sitaara-active-view");
-    if (savedView === "verification" || savedView === "scan" || savedView === "map") setView(savedView);
-    setViewRestored(true);
+    queueMicrotask(() => {
+    if (["verification", "scan", "map", "records", "processing", "preferences", "help"].includes(savedView ?? "")) setView(savedView as View);
+      setViewRestored(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -988,13 +1322,13 @@ export default function Home() {
           <button className={view === "verification" ? "active" : ""} onClick={() => { setView("verification"); setMenuOpen(false); }}><LayoutDashboard size={18} /><span>Verification</span><ChevronRight size={14} /></button>
           <button className={view === "scan" ? "active" : ""} onClick={() => { setView("scan"); setMenuOpen(false); }}><ScanLine size={18} /><span>Document lab</span><ChevronRight size={14} /></button>
           <button className={view === "map" ? "active" : ""} onClick={() => { setView("map"); setMenuOpen(false); }}><MapPinned size={18} /><span>Plot map</span><ChevronRight size={14} /></button>
-          <button><BookOpen size={18} /><span>Records</span><b>24</b></button>
+          <button className={view === "records" ? "active" : ""} onClick={() => { setView("records"); setMenuOpen(false); }}><BookOpen size={18} /><span>Records</span><b>24</b></button>
         </nav>
         <div className="sidebar-rule" />
         <nav aria-label="Secondary navigation">
-          <button><WandSparkles size={18} /><span>Processing</span><b>3</b></button>
-          <button><Settings size={18} /><span>Preferences</span></button>
-          <button><CircleHelp size={18} /><span>Help center</span></button>
+          <button className={view === "processing" ? "active" : ""} onClick={() => { setView("processing"); setMenuOpen(false); }}><WandSparkles size={18} /><span>Processing</span><b>3</b></button>
+          <button className={view === "preferences" ? "active" : ""} onClick={() => { setView("preferences"); setMenuOpen(false); }}><Settings size={18} /><span>Preferences</span></button>
+          <button className={view === "help" ? "active" : ""} onClick={() => { setView("help"); setMenuOpen(false); }}><CircleHelp size={18} /><span>Help center</span></button>
         </nav>
         <div className="pro-card">
           <Sparkles size={18} />
@@ -1007,7 +1341,7 @@ export default function Home() {
 
       <div className="main-panel">
         <div className="mobile-topbar"><button onClick={() => setMenuOpen((value) => !value)} aria-label="Open menu"><Menu /></button><div><BrandMark /><strong>Sitaara Verify</strong></div><button onClick={() => setUpgradeOpen(true)}><Sparkles size={17} /></button></div>
-        {view === "verification" ? <VerificationWorkspace /> : view === "scan" ? <ScanWorkspace /> : <MapWorkspace />}
+        {view === "verification" ? <VerificationWorkspace onOpenDocumentLab={() => setView("scan")} onOpenMap={() => setView("map")} onOpenRecords={() => setView("records")} /> : view === "scan" ? <ScanWorkspace /> : view === "map" ? <MapWorkspace /> : <UtilityWorkspace view={view} onNavigate={setView} />}
       </div>
       {menuOpen && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
       {upgradeOpen && <UpgradeModal onClose={() => setUpgradeOpen(false)} />}

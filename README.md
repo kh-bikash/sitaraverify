@@ -1,100 +1,48 @@
-# vinext-starter
+# Sitaara Verify
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Multilingual document OCR and property-verification workspace for Indian land records.
 
-## Prerequisites
+## What is implemented
 
-- Node.js `>=22.13.0`
+- PDF and image upload with the original page on the left.
+- Clean, searchable, re-typeset text on the right.
+- Server-side Gemini OCR for printed and handwritten Indian scripts.
+- Conservative low-confidence handwriting review before legal text is accepted.
+- Local persistence of the uploaded file, OCR response, and confirmed corrections.
+- Delete removes the uploaded document and OCR response from browser storage.
+- Print-to-PDF export of the reviewed reading-order document.
+- OpenStreetMap plot overlay with editable coordinates and transparency.
 
-## Quick Start
+## Setup
 
-```bash
+Requirements: Node.js 22.13 or newer.
+
+```powershell
 npm install
+Copy-Item .env.example .env.local
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Create a new Gemini API key in Google AI Studio, then set it only in `.env.local`:
 
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```dotenv
+GEMINI_API_KEY=your_new_key
+GEMINI_OCR_MODEL=gemini-3.6-flash
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Never prefix the key with `NEXT_PUBLIC_`, embed it in `app/page.tsx`, or commit `.env.local`. The browser uploads the selected document to `/api/ocr/gemini`; that server-only route calls Gemini and returns normalized OCR data. Inline uploads are capped at 19 MB.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+For Vercel, create the same two environment variables in Project Settings → Environment Variables. Redeploy after adding or rotating the key.
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## Accuracy and privacy policy
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+Gemini output is assistive OCR, not verified legal evidence. Lines below the confidence threshold remain editable and highlighted until a reviewer confirms them against the original scan.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+Documents are transmitted to Google for processing. The API key stays on the application server, but the workflow is not local/private OCR. Review the Google API data-use settings before processing sensitive property records; the Gemini free tier can use submitted content to improve products.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## Verification
 
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+```powershell
+npm run lint
+npm test
+```

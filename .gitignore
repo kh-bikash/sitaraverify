@@ -30,6 +30,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -46,3 +47,22 @@ next-env.d.ts
 /skills-lock.json
 /dev-server.log
 /dev-server.err.log
+/.venv/
+/.paddlex-cache/
+/.handwriting-cache/
+/.handwriting-build/
+/.handwriting-data/
+/.handwriting-model/
+/.handwriting-models/
+/.handwriting-venv/
+/.tmp-platter/
+/.tmp-doctr/
+/ocr_service/test_output/
+/ocr_service/uploads/
+/ocr_service/*.log
+/handwriting_service/*.log
+
+# retired local-model prototypes (the product uses the Gemini server route)
+/ocr_service/
+/handwriting_service/
+/scripts/

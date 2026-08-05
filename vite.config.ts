@@ -44,9 +44,28 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      // vinext currently creates several Vite environments. After an env-file
+      // restart their HMR transports can outlive the server and flood the page
+      // with `Cannot read properties of undefined (reading 'send')`. A normal
+      // refresh is reliable for this local document-processing application.
+      hmr: false,
+      watch: {
+        ...(isCodexSeatbeltSandbox
+          ? { useFsEvents: false, usePolling: true }
+          : {}),
+        ignored: [
+          "**/.venv/**",
+          "**/.handwriting-venv/**",
+          "**/.handwriting-cache/**",
+          "**/.handwriting-models/**",
+          "**/.paddlex-cache/**",
+          "**/.tmp-doctr/**",
+          "**/.tmp-platter/**",
+          "**/__pycache__/**",
+        ],
+      },
+    },
     plugins: [
       vinext(),
       sites(),
