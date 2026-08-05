@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Map as LeafletMap, Polygon as LeafletPolygon } from "leaflet";
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowLeftRight,
   BadgeCheck,
@@ -10,10 +11,16 @@ import {
   Check,
   ChevronRight,
   CircleHelp,
+  CircleCheck,
+  CircleX,
+  Database,
+  FileJson,
   FileText,
   Focus,
   Layers3,
   Languages,
+  LayoutDashboard,
+  Link2,
   MapPinned,
   Maximize2,
   Menu,
@@ -21,7 +28,9 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  ShieldAlert,
   Sparkles,
+  RefreshCw,
   Trash2,
   Upload,
   WandSparkles,
@@ -31,16 +40,17 @@ import {
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
-type View = "scan" | "map";
+type View = "verification" | "scan" | "map";
 type ScanState = "ready" | "processing";
 type Corner = [number, number];
 type UploadedDocument = { url: string; clearUrl: string; kind: "pdf" | "image"; name: string; size: string };
+type VerificationStatus = "positive" | "refer" | "negative";
 
 const starterCorners: Corner[] = [
-  [12.97455, 77.59185],
-  [12.97476, 77.59412],
-  [12.9729, 77.59452],
-  [12.97258, 77.59218],
+  [25.28806, 82.97291],
+  [25.28834, 82.97431],
+  [25.28691, 82.97463],
+  [25.28667, 82.97317],
 ];
 
 const documentLines = [
@@ -122,14 +132,84 @@ function RestoredPage({ showBlocks }: { showBlocks: boolean }) {
   );
 }
 
-function DocumentPreview({ document, clear = false }: { document: UploadedDocument; clear?: boolean }) {
+function PdfPagePreview({ document, page, clear, onPageCount }: { document: UploadedDocument; page: number; clear: boolean; onPageCount: (count: number) => void }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const onPageCountRef = useRef(onPageCount);
+  onPageCountRef.current = onPageCount;
+
+  useEffect(() => {
+    let disposed = false;
+    let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null;
+    void import("pdfjs-dist").then(async (pdfjs) => {
+      if (disposed) return;
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const pdf = await pdfjs.getDocument(document.url).promise;
+      if (disposed) return;
+      onPageCountRef.current(pdf.numPages);
+      const safePage = Math.min(page, pdf.numPages);
+      const pdfPage = await pdf.getPage(safePage);
+      const viewport = pdfPage.getViewport({ scale: 1.75 });
+      const canvas = window.document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const context = canvas.getContext("2d", { willReadFrequently: clear });
+      if (!context) return;
+      renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
+      await renderTask.promise;
+      if (clear) {
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        for (let index = 0; index < pixels.data.length; index += 4) {
+          const red = pixels.data[index];
+          const green = pixels.data[index + 1];
+          const blue = pixels.data[index + 2];
+          const lightness = red * 0.299 + green * 0.587 + blue * 0.114;
+          const blueInk = blue > red * 1.08 && blue > green * 1.04 && lightness < 205;
+          if (lightness > 202) {
+            const whitening = Math.min(1, (lightness - 202) / 38 + 0.42);
+            pixels.data[index] = Math.round(red + (255 - red) * whitening);
+            pixels.data[index + 1] = Math.round(green + (255 - green) * whitening);
+            pixels.data[index + 2] = Math.round(blue + (255 - blue) * whitening);
+          } else if (blueInk) {
+            pixels.data[index] = Math.round(red * 0.72);
+            pixels.data[index + 1] = Math.round(green * 0.72);
+            pixels.data[index + 2] = Math.round(Math.min(255, blue * 0.9));
+          } else {
+            const darkening = lightness < 125 ? 0.68 : 0.82;
+            pixels.data[index] = Math.round(red * darkening);
+            pixels.data[index + 1] = Math.round(green * darkening);
+            pixels.data[index + 2] = Math.round(blue * darkening);
+          }
+        }
+        context.putImageData(pixels, 0, 0);
+      }
+      if (!disposed) {
+        setImageUrl(canvas.toDataURL("image/jpeg", clear ? 0.94 : 0.9));
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!disposed) setLoading(false);
+    });
+    return () => {
+      disposed = true;
+      renderTask?.cancel();
+    };
+  }, [clear, document.url, page]);
+
+  return (
+    <div className={`uploaded-paper uploaded-pdf rendered-pdf ${clear ? "clear-preview" : ""}`}>
+      {loading ? <div className="page-render-loading"><ScanLine size={24} /><span>Rendering page {page}</span></div> : imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageUrl} alt={`${clear ? "Cleaned" : "Original"} PDF page ${page}`} />
+      ) : <div className="page-render-loading"><FileText size={24} /><span>Preview unavailable</span></div>}
+      {clear && <div className="enhancement-note"><WandSparkles size={13} /> Background cleaned · ink strengthened · page {page}</div>}
+    </div>
+  );
+}
+
+function DocumentPreview({ document, page, clear = false, onPageCount }: { document: UploadedDocument; page: number; clear?: boolean; onPageCount: (count: number) => void }) {
   if (document.kind === "pdf") {
-    return (
-      <div className={`uploaded-paper uploaded-pdf ${clear ? "clear-preview" : ""}`}>
-        <iframe src={`${document.url}#toolbar=0&navpanes=0&view=FitH`} title={`${clear ? "Clear" : "Original"} ${document.name}`} />
-        {clear && <div className="enhancement-note"><WandSparkles size={13} /> Contrast and legibility preview</div>}
-      </div>
-    );
+    return <PdfPagePreview document={document} page={page} clear={clear} onPageCount={onPageCount} />;
   }
 
   return (
@@ -152,9 +232,260 @@ function EmptyDocument({ onUpload, clear = false }: { onUpload: () => void; clea
   );
 }
 
+const verificationRows: Array<{
+  parameter: string;
+  document: string;
+  portal: string;
+  comparisonOne: string;
+  report: string;
+  comparisonTwo: string;
+  statusOne: VerificationStatus;
+  statusTwo: VerificationStatus;
+}> = [
+  {
+    parameter: "Ownership",
+    document: "Seller: Rakesh Kumar Sharma\nBuyer: Meera Sharma",
+    portal: "Meera Sharma\nMutation entry verified",
+    comparisonOne: "Buyer matches current holder\nCross-script match: 99.4%",
+    report: "Owner / applicant: Meera Sharma",
+    comparisonTwo: "Current owner confirmed on site",
+    statusOne: "positive",
+    statusTwo: "positive",
+  },
+  {
+    parameter: "Address",
+    document: "Khasra 214/3, Bhadaini\nSadar, Varanasi, UP",
+    portal: "Khasra 214/3, Bhadaini\nTehsil Sadar, Varanasi",
+    comparisonOne: "All material fields match",
+    report: "Plot 214/3, Mauza Bhadaini\nVaranasi · 221005",
+    comparisonTwo: "Plot and locality aligned",
+    statusOne: "positive",
+    statusTwo: "positive",
+  },
+  {
+    parameter: "Area / size",
+    document: "1,856 sq.ft\n172.43 sq.m · residential",
+    portal: "172.43 sq.m\n1,856 sq.ft converted",
+    comparisonOne: "0.0% deviation",
+    report: "Measured: 1,820 sq.ft\nLaser survey completed",
+    comparisonTwo: "1.94% deviation · within tolerance",
+    statusOne: "positive",
+    statusTwo: "positive",
+  },
+  {
+    parameter: "Boundary · E/W/N/S",
+    document: "E: House 214/4\nW: 18 ft municipal lane\nN: Sharma house · S: vacant plot",
+    portal: "E: Khasra 214/4\nW: 20 ft public lane\nN: Abadi · S: Khasra 215",
+    comparisonOne: "West access width differs by 2 ft",
+    report: "E: adjoining house\nW: 20 ft lane\nN: residence · S: open parcel",
+    comparisonTwo: "Physical sides align with record",
+    statusOne: "refer",
+    statusTwo: "positive",
+  },
+  {
+    parameter: "Geo-coordinates",
+    document: "Not stated in deed\nDerived from cadastral overlay",
+    portal: "25.287310° N\n82.973840° E",
+    comparisonOne: "Portal centroid mapped to parcel",
+    report: "25.287512° N\n82.973961° E · 9 geotagged photos",
+    comparisonTwo: "25.5 m deviation · within tolerance",
+    statusOne: "refer",
+    statusTwo: "positive",
+  },
+];
+
+function ResultBadge({ status, compact = false }: { status: VerificationStatus; compact?: boolean }) {
+  const content = {
+    positive: { icon: <CircleCheck size={compact ? 13 : 15} />, label: "Positive" },
+    refer: { icon: <AlertTriangle size={compact ? 13 : 15} />, label: "Refer" },
+    negative: { icon: <CircleX size={compact ? 13 : 15} />, label: "Negative" },
+  }[status];
+  return <span className={`result-badge ${status} ${compact ? "compact" : ""}`}>{content.icon}{content.label}</span>;
+}
+
+function VerificationWorkspace() {
+  const [running, setRunning] = useState(false);
+  const [activeDetail, setActiveDetail] = useState("matrix");
+  const [sourceProgress, setSourceProgress] = useState(100);
+
+  const rerun = () => {
+    setRunning(true);
+    setSourceProgress(8);
+    let value = 8;
+    const timer = window.setInterval(() => {
+      value += 11;
+      setSourceProgress(Math.min(value, 100));
+      if (value >= 100) {
+        window.clearInterval(timer);
+        setRunning(false);
+      }
+    }, 170);
+  };
+
+  const exportJson = () => {
+    const payload = {
+      applicationId: "SHFL0021847",
+      applicant: "Meera Sharma",
+      deed: "Sale Deed SD-47/2025/1182",
+      property: { khasra: "214/3", village: "Bhadaini", tehsil: "Sadar", district: "Varanasi", state: "UP" },
+      results: verificationRows,
+      aggregate: { positive: 8, refer: 2, negative: 0, recommendation: "HOLD", score: 90 },
+      generatedAt: new Date().toISOString(),
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "SHFL0021847-property-verification.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportReport = async () => {
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ unit: "pt", format: "a3", orientation: "landscape" });
+    const width = pdf.internal.pageSize.getWidth();
+    pdf.setFillColor(28, 49, 84);
+    pdf.rect(0, 0, width, 70, "F");
+    pdf.setFillColor(239, 111, 38);
+    pdf.rect(width - 245, 0, 245, 70, "F");
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(21);
+    pdf.text("Sitaara Property Verification Report", 34, 31);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.text("Three-source verification · Application SHFL0021847", 34, 50);
+    pdf.text(`Generated ${new Date().toLocaleDateString("en-IN")}`, width - 218, 31);
+    pdf.text("Recommendation: HOLD", width - 218, 49);
+
+    pdf.setTextColor(26, 31, 29);
+    pdf.setFontSize(8);
+    const meta = [
+      ["Applicant", "Meera Sharma"], ["Deed", "Sale Deed SD-47/2025/1182"],
+      ["Property", "Khasra 214/3, Bhadaini, Sadar, Varanasi, UP"], ["Field visit", "22 Jul 2026"],
+    ];
+    meta.forEach(([label, value], index) => {
+      const x = 34 + (index % 2) * 560;
+      const y = 96 + Math.floor(index / 2) * 24;
+      pdf.setFont("helvetica", "bold"); pdf.text(label.toUpperCase(), x, y);
+      pdf.setFont("helvetica", "normal"); pdf.text(value, x + 75, y);
+    });
+
+    const columns = [34, 65, 165, 335, 505, 650, 820, 965, 1145];
+    const headers = ["Sr.", "Parameter", "Property document (OCR)", "Government portal", "Doc vs portal", "Technical report", "Portal vs tech"];
+    const tableTop = 155;
+    pdf.setFillColor(28, 49, 84);
+    pdf.rect(columns[0], tableTop, columns[7] - columns[0], 34, "F");
+    pdf.setTextColor(255,255,255); pdf.setFont("helvetica","bold"); pdf.setFontSize(7);
+    headers.forEach((header, i) => pdf.text(header, columns[i] + 5, tableTop + 20));
+    verificationRows.forEach((row, index) => {
+      const y = tableTop + 34 + index * 86;
+      const cells = [String(index + 1), row.parameter, row.document, row.portal, row.comparisonOne, row.report, row.comparisonTwo];
+      const statuses: Array<VerificationStatus | null> = [null, null, null, null, row.statusOne, null, row.statusTwo];
+      cells.forEach((cell, cellIndex) => {
+        const cellWidth = columns[cellIndex + 1] - columns[cellIndex];
+        const status = statuses[cellIndex];
+        if (status) {
+          const color = status === "positive" ? [228,244,235] : status === "refer" ? [255,244,214] : [255,229,226];
+          pdf.setFillColor(color[0], color[1], color[2]);
+        } else pdf.setFillColor(index % 2 ? 248 : 240, index % 2 ? 249 : 244, index % 2 ? 247 : 249);
+        pdf.rect(columns[cellIndex], y, cellWidth, 86, "FD");
+        pdf.setTextColor(32,39,35); pdf.setFont("helvetica", cellIndex === 1 || status ? "bold" : "normal"); pdf.setFontSize(6.7);
+        const lines = pdf.splitTextToSize(cell.replaceAll("\n", " · "), cellWidth - 10);
+        pdf.text(lines.slice(0, 7), columns[cellIndex] + 5, y + 14);
+      });
+    });
+    const scoreY = tableTop + 34 + verificationRows.length * 86 + 20;
+    pdf.setFillColor(255,244,214); pdf.rect(34, scoreY, 1111, 45, "F");
+    pdf.setTextColor(120,73,5); pdf.setFont("helvetica","bold"); pdf.setFontSize(11);
+    pdf.text("AGGREGATE  8 POSITIVE  ·  2 REFER  ·  0 NEGATIVE     RECOMMENDATION: HOLD", 54, scoreY + 28);
+    pdf.save("SHFL0021847-property-verification.pdf");
+  };
+
+  return (
+    <section className="verification-workspace" aria-labelledby="verification-title">
+      <header className="case-header">
+        <div className="case-identity">
+          <div className="case-breadcrumb"><span>Applications</span><ChevronRight size={12} /><strong>SHFL0021847</strong></div>
+          <div className="case-title-row"><h1 id="verification-title">Meera Sharma</h1><span className="case-verdict"><AlertTriangle size={14} /> Hold for review</span></div>
+          <p>Sale Deed · Khasra 214/3 · Bhadaini, Sadar, Varanasi, Uttar Pradesh</p>
+        </div>
+        <div className="case-actions">
+          <button className="button button-ghost" onClick={exportJson}><FileJson size={16} /> JSON</button>
+          <button className="button button-ghost" onClick={rerun} disabled={running}><RefreshCw size={16} className={running ? "spinning" : ""} /> {running ? "Verifying" : "Re-run"}</button>
+          <button className="button button-primary" onClick={exportReport}><ArrowDownToLine size={16} /> Download report</button>
+        </div>
+      </header>
+
+      <div className="case-meta-strip">
+        <div><span>Application</span><strong>SHFL0021847</strong></div>
+        <div><span>Deed no.</span><strong>SD-47/2025/1182</strong></div>
+        <div><span>Product</span><strong>HL · Construction</strong></div>
+        <div><span>Field visit</span><strong>22 Jul 2026</strong></div>
+        <div><span>Last verified</span><strong>Just now</strong></div>
+      </div>
+
+      <div className="source-grid">
+        <article className="source-card"><div className="source-card-icon"><FileText size={19} /></div><div><span>Property document</span><strong>Sale deed · OCR complete</strong><small>Hindi + English · 21 fields extracted</small></div><ResultBadge status="positive" compact /></article>
+        <article className="source-card"><div className="source-card-icon"><Database size={19} /></div><div><span>Government record</span><strong>UP Bhulekh + BhuNaksha</strong><small>Khatauni and parcel matched · cached now</small></div><ResultBadge status="positive" compact /></article>
+        <article className="source-card"><div className="source-card-icon"><ScanLine size={19} /></div><div><span>Technical valuation</span><strong>TVR parsed · 9 site photos</strong><small>Field report dated 22 Jul 2026</small></div><ResultBadge status="positive" compact /></article>
+        {running && <div className="source-progress"><i style={{width:`${sourceProgress}%`}} /></div>}
+      </div>
+
+      <div className="verification-tabs" role="tablist">
+        {[['matrix','Comparison matrix'],['evidence','Evidence & map'],['risk','Risk flags']].map(([id,label]) => <button key={id} className={activeDetail === id ? "active" : ""} onClick={() => setActiveDetail(id)}>{label}</button>)}
+      </div>
+
+      {activeDetail === "matrix" && (
+        <div className="verification-main-grid">
+          <div className="matrix-panel">
+            <div className="matrix-heading"><div><h2>Three-source comparison</h2><p>Two independent checks per parameter, using the BRD tolerance rules.</p></div><div className="score-mini"><strong>90%</strong><span>verification score</span></div></div>
+            <div className="matrix-scroll">
+              <table className="verification-matrix">
+                <thead><tr><th>Parameter</th><th>Property document · OCR</th><th>Government portal</th><th>Doc vs portal</th><th>Technical valuation</th><th>Portal vs tech</th></tr></thead>
+                <tbody>{verificationRows.map((row) => <tr key={row.parameter}>
+                  <th>{row.parameter}</th>
+                  <td>{row.document.split("\n").map((line)=><span key={line}>{line}</span>)}</td>
+                  <td>{row.portal.split("\n").map((line)=><span key={line}>{line}</span>)}</td>
+                  <td className={`result-cell ${row.statusOne}`}><ResultBadge status={row.statusOne} compact /><p>{row.comparisonOne}</p></td>
+                  <td>{row.report.split("\n").map((line)=><span key={line}>{line}</span>)}</td>
+                  <td className={`result-cell ${row.statusTwo}`}><ResultBadge status={row.statusTwo} compact /><p>{row.comparisonTwo}</p></td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+          <aside className="decision-panel">
+            <div className="decision-top"><span>Aggregate decision</span><strong>HOLD</strong><p>Eight positive checks, two referrals, and no critical mismatches.</p></div>
+            <div className="decision-counts"><div className="positive"><b>08</b><span>Positive</span></div><div className="refer"><b>02</b><span>Refer</span></div><div className="negative"><b>00</b><span>Negative</span></div></div>
+            <div className="review-reason"><AlertTriangle size={17} /><div><strong>Analyst review required</strong><span>Confirm the 2 ft access-width variance and cadastral centroid source.</span></div></div>
+            <div className="decision-rule"><span>Decision rule</span><strong>Hold when ≥1 Refer and no Negative</strong></div>
+            <button className="approve-case"><CircleCheck size={16} /> Mark reviewed and approve</button>
+          </aside>
+        </div>
+      )}
+
+      {activeDetail === "evidence" && (
+        <div className="evidence-grid">
+          <div className="evidence-map-card"><div className="evidence-card-head"><div><h2>Parcel evidence</h2><p>Khasra 214/3 · cadastral boundary aligned to the basemap.</p></div><span>±2.4 m overlay estimate</span></div><div className="evidence-map"><ParcelMap opacity={0.42} corners={starterCorners} onCornerChange={() => undefined} /></div></div>
+          <div className="evidence-list"><h2>Coordinate chain</h2><div><span>01</span><p><strong>Portal centroid</strong><small>25.287310° N, 82.973840° E</small></p><Check size={15} /></div><div><span>02</span><p><strong>Technical visit GPS</strong><small>25.5 m deviation · within tolerance</small></p><Check size={15} /></div><div><span>03</span><p><strong>Ground evidence</strong><small>9 photos within a 30 m radius</small></p><Check size={15} /></div><div className="evidence-caveat"><ShieldAlert size={17} /><p><strong>Legal caution</strong><small>Cadastral overlay is supporting evidence. Revenue records and field verification remain authoritative.</small></p></div></div>
+        </div>
+      )}
+
+      {activeDetail === "risk" && (
+        <div className="risk-workspace"><div className="risk-header"><div><h2>Auto-detected risk flags</h2><p>Flags remain separate from the five comparison parameters.</p></div><span>3 open items</span></div>{[
+          ["Access width variance", "Field measurement is 2 ft wider than the registered deed", "refer"],
+          ["Centroid-based coordinates", "Replace portal centroid with an authenticated survey point when available", "refer"],
+          ["Mutation is recent", "Review the July mutation entry before final approval", "refer"],
+        ].map(([title,body,status],index)=><article className={`risk-item ${status}`} key={title}><span>{String(index+1).padStart(2,"0")}</span><div><strong>{title}</strong><p>{body}</p></div><ResultBadge status={status as VerificationStatus} compact /></article>)}</div>
+      )}
+    </section>
+  );
+}
+
 function ScanWorkspace() {
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadUrlRef = useRef<string | null>(null);
+  const processingTimerRef = useRef<number | null>(null);
   const [fileName, setFileName] = useState("RTC_Survey_118_2B.pdf");
   const [fileMeta, setFileMeta] = useState("8 pages · 14.8 MB");
   const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
@@ -163,9 +494,11 @@ function ScanWorkspace() {
   const [progress, setProgress] = useState(100);
   const [showBlocks, setShowBlocks] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(8);
   const [languageMode, setLanguageMode] = useState("auto-india");
 
   useEffect(() => () => {
+    if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
   }, []);
 
@@ -187,6 +520,7 @@ function ScanWorkspace() {
 
   const processFile = async (file?: File) => {
     if (!file) return;
+    if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
     const objectUrl = URL.createObjectURL(file);
     uploadUrlRef.current = objectUrl;
@@ -195,6 +529,8 @@ function ScanWorkspace() {
     setFileName(file.name);
     setFileMeta(`${kind === "pdf" ? "PDF document" : "Image document"} · ${size}`);
     setIsEmpty(false);
+    setPage(1);
+    setPageCount(kind === "pdf" ? 1 : 1);
     setUploadedDocument({ url: objectUrl, clearUrl: objectUrl, kind, name: file.name, size });
     setScanState("processing");
     setProgress(7);
@@ -208,12 +544,16 @@ function ScanWorkspace() {
       setProgress(Math.min(value, 100));
       if (value >= 100) {
         window.clearInterval(timer);
+        processingTimerRef.current = null;
         setScanState("ready");
       }
     }, 180);
+    processingTimerRef.current = timer;
   };
 
   const removeUpload = () => {
+    if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
+    processingTimerRef.current = null;
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
     uploadUrlRef.current = null;
     setUploadedDocument(null);
@@ -223,6 +563,7 @@ function ScanWorkspace() {
     setProgress(0);
     setIsEmpty(true);
     setPage(1);
+    setPageCount(0);
     if (uploadRef.current) uploadRef.current.value = "";
   };
 
@@ -281,6 +622,7 @@ function ScanWorkspace() {
         </div>
         <div className="header-actions">
           <button className="button button-ghost" onClick={() => uploadRef.current?.click()}><Upload size={17} /> New scan</button>
+          {!isEmpty && <button className="button button-danger" type="button" onClick={removeUpload}><Trash2 size={17} /> Delete document</button>}
           <button className="button button-primary" onClick={exportPdf} disabled={scanState === "processing" || isEmpty}><ArrowDownToLine size={17} /> Export clear PDF</button>
         </div>
       </header>
@@ -329,8 +671,8 @@ function ScanWorkspace() {
             <option value="english">English</option>
           </select>
         </label>
-        {(uploadedDocument || isEmpty) && uploadedDocument && (
-          <button className="delete-upload" onClick={removeUpload} aria-label={`Delete ${fileName}`} title="Delete uploaded document">
+        {!isEmpty && (
+          <button className="delete-upload" type="button" onClick={removeUpload} aria-label={`Delete ${fileName}`} title="Delete uploaded document">
             <Trash2 size={15} /><span>Delete</span>
           </button>
         )}
@@ -339,13 +681,13 @@ function ScanWorkspace() {
       <div className="document-stage">
         <aside className="page-rail" aria-label="Document pages">
           <div className="rail-title"><span>Pages</span><strong>08</strong></div>
-          {[1, 2, 3, 4].map((item) => (
+          {Array.from({ length: Math.min(4, Math.max(1, pageCount)) }, (_, index) => index + 1).map((item) => (
             <button key={item} className={`page-thumb ${page === item ? "active" : ""}`} onClick={() => setPage(item)}>
               <div className="mini-paper"><i /><i /><i /><i /></div>
               <span>{String(item).padStart(2, "0")}</span>
             </button>
           ))}
-          <button className="more-pages">+4</button>
+          {pageCount > 4 && <button className="more-pages">+{pageCount - 4}</button>}
         </aside>
 
         <div className="comparison-area">
@@ -360,12 +702,12 @@ function ScanWorkspace() {
           )}
           <div className="page-column">
             <div className="column-head"><span>Original scan</span><small>Source preserved</small></div>
-            {uploadedDocument ? <DocumentPreview document={uploadedDocument} /> : isEmpty ? <EmptyDocument onUpload={() => uploadRef.current?.click()} /> : <OriginalPage />}
+            {uploadedDocument ? <DocumentPreview document={uploadedDocument} page={page} onPageCount={(count) => { setPageCount(count); setFileMeta(`${count} page${count === 1 ? "" : "s"} · ${uploadedDocument.size}`); }} /> : isEmpty ? <EmptyDocument onUpload={() => uploadRef.current?.click()} /> : <OriginalPage />}
           </div>
           <div className="compare-divider"><div><ArrowLeftRight size={15} /></div></div>
           <div className="page-column">
             <div className="column-head"><span>Clear document</span><small className="success-text"><Check size={12} /> Searchable</small></div>
-            {uploadedDocument ? <DocumentPreview document={uploadedDocument} clear /> : isEmpty ? <EmptyDocument clear onUpload={() => uploadRef.current?.click()} /> : <RestoredPage showBlocks={showBlocks} />}
+            {uploadedDocument ? <DocumentPreview document={uploadedDocument} page={page} clear onPageCount={(count) => { setPageCount(count); setFileMeta(`${count} page${count === 1 ? "" : "s"} · ${uploadedDocument.size}`); }} /> : isEmpty ? <EmptyDocument clear onUpload={() => uploadRef.current?.click()} /> : <RestoredPage showBlocks={showBlocks} />}
           </div>
         </div>
 
@@ -405,7 +747,7 @@ function ParcelMap({ opacity, corners, onCornerChange }: { opacity: number; corn
       }).addTo(map);
       L.control.zoom({ position: "bottomright" }).addTo(map);
       const polygon = L.polygon(corners, { color: "#e8ff86", weight: 3, fillColor: "#486857", fillOpacity: opacity }).addTo(map);
-      polygon.bindTooltip("Survey 118/2B · 1.42 acres", { permanent: true, direction: "center", className: "parcel-label" });
+      polygon.bindTooltip("Khasra 214/3 · 1,856 sq.ft", { permanent: true, direction: "center", className: "parcel-label" });
       corners.forEach((corner, index) => {
         const marker = L.marker(corner, {
           draggable: true,
@@ -442,7 +784,7 @@ function MapWorkspace() {
   const [opacity, setOpacity] = useState(0.38);
   const [corners, setCorners] = useState<Corner[]>(starterCorners);
   const [located, setLocated] = useState(true);
-  const [surveyNumber, setSurveyNumber] = useState("118/2B");
+  const [surveyNumber, setSurveyNumber] = useState("214/3");
   const [recordOpen, setRecordOpen] = useState(true);
 
   const locate = () => {
@@ -472,10 +814,10 @@ function MapWorkspace() {
           <div className="search-intro"><MapPinned size={22} /><div><strong>Locate a land record</strong><span>Use the official registry reference, then confirm its corners.</span></div></div>
           <label>Survey / plot number<input value={surveyNumber} onChange={(event) => setSurveyNumber(event.target.value)} /></label>
           <div className="field-row">
-            <label>Village<input defaultValue="Sampigehalli" /></label>
-            <label>Hobli<input defaultValue="Yelahanka" /></label>
+            <label>Village<input defaultValue="Bhadaini" /></label>
+            <label>Tehsil<input defaultValue="Sadar" /></label>
           </div>
-          <label>District<input defaultValue="Bengaluru Urban" /></label>
+          <label>District<input defaultValue="Varanasi" /></label>
           <button className="button button-primary locate-button" onClick={locate}><Search size={17} /> {located ? "Locate plot" : "Matching record…"}</button>
           <div className="source-note"><CircleHelp size={16} /><p><strong>Registry-aware, map-safe</strong><span>OpenStreetMap is the basemap. Legal parcel geometry must come from a survey record, GeoJSON, or confirmed corner points.</span></p></div>
           {recordOpen && located && (
@@ -483,8 +825,8 @@ function MapWorkspace() {
               <button className="record-close" aria-label="Close record" onClick={() => setRecordOpen(false)}><X size={14} /></button>
               <div className="match-label"><Check size={12} /> Matched sample</div>
               <h3>Survey {surveyNumber}</h3>
-              <p>Sampigehalli Village · Khata 42</p>
-              <div className="record-metrics"><span><b>1.42</b> acres</span><span><b>362.1</b> m perimeter</span></div>
+              <p>Bhadaini · Khata 84</p>
+              <div className="record-metrics"><span><b>1,856</b> sq.ft</span><span><b>170.4</b> m perimeter</span></div>
             </div>
           )}
         </aside>
@@ -525,12 +867,12 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Upgrade plan">
       <div className="upgrade-modal">
         <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
-        <div className="modal-copy"><div className="eyebrow"><Sparkles size={13} /> Vellum Pro</div><h2>Precision work,<br /><em>without the cloud wait.</em></h2><p>Unlimited CPU restoration, searchable PDF/A export, and parcel workspaces for your whole practice.</p></div>
+        <div className="modal-copy"><div className="eyebrow"><Sparkles size={13} /> Enterprise operations</div><h2>Verification at<br /><em>portfolio scale.</em></h2><p>Connect state portals, protect regulated data, and deliver each credit-ready report in under three minutes.</p></div>
         <div className="plan-card">
-          <div className="plan-price"><span>Pro workspace</span><strong>₹1,499<small>/month</small></strong></div>
-          {["Unlimited document pages", "PP-StructureV3 local worker", "Parcel overlays and GeoJSON", "Priority batch processing"].map((item) => <div className="plan-feature" key={item}><Check size={15} />{item}</div>)}
-          <button className="button button-primary">Start 14-day trial</button>
-          <small>No card required · Cancel anytime</small>
+          <div className="plan-price"><span>Production controls</span><strong>500+<small> concurrent cases</small></strong></div>
+          {["State portal connector registry", "24-hour evidence cache", "PII-masked audit trail", "SFTP and S3 report delivery"].map((item) => <div className="plan-feature" key={item}><Check size={15} />{item}</div>)}
+          <button className="button button-primary">Configure deployment</button>
+          <small>Secrets-manager ready · Role-based access</small>
         </div>
       </div>
     </div>
@@ -538,15 +880,16 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("scan");
+  const [view, setView] = useState<View>("verification");
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   return (
     <main className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
-        <div className="sidebar-brand"><BrandMark /><div><strong>Vellum</strong><span>Document intelligence</span></div></div>
+        <div className="sidebar-brand"><BrandMark /><div><strong>Sitaara Verify</strong><span>Property intelligence</span></div></div>
         <nav aria-label="Primary navigation">
+          <button className={view === "verification" ? "active" : ""} onClick={() => { setView("verification"); setMenuOpen(false); }}><LayoutDashboard size={18} /><span>Verification</span><ChevronRight size={14} /></button>
           <button className={view === "scan" ? "active" : ""} onClick={() => { setView("scan"); setMenuOpen(false); }}><ScanLine size={18} /><span>Document lab</span><ChevronRight size={14} /></button>
           <button className={view === "map" ? "active" : ""} onClick={() => { setView("map"); setMenuOpen(false); }}><MapPinned size={18} /><span>Plot map</span><ChevronRight size={14} /></button>
           <button><BookOpen size={18} /><span>Records</span><b>24</b></button>
@@ -559,16 +902,16 @@ export default function Home() {
         </nav>
         <div className="pro-card">
           <Sparkles size={18} />
-          <strong>Go beyond clean</strong>
-          <span>Unlimited pages, batch OCR, and precise plot overlays.</span>
-          <button onClick={() => setUpgradeOpen(true)}>Explore Pro <ChevronRight size={14} /></button>
+          <strong>Production controls</strong>
+          <span>Portal connectors, audit trails, SFTP/S3 delivery and peak-load scaling.</span>
+          <button onClick={() => setUpgradeOpen(true)}>Configure <ChevronRight size={14} /></button>
         </div>
         <div className="user-card"><div>AK</div><p><strong>Arjun Kumar</strong><span>Trial · 11 days left</span></p><ChevronRight size={14} /></div>
       </aside>
 
       <div className="main-panel">
-        <div className="mobile-topbar"><button onClick={() => setMenuOpen((value) => !value)} aria-label="Open menu"><Menu /></button><div><BrandMark /><strong>Vellum</strong></div><button onClick={() => setUpgradeOpen(true)}><Sparkles size={17} /></button></div>
-        {view === "scan" ? <ScanWorkspace /> : <MapWorkspace />}
+        <div className="mobile-topbar"><button onClick={() => setMenuOpen((value) => !value)} aria-label="Open menu"><Menu /></button><div><BrandMark /><strong>Sitaara Verify</strong></div><button onClick={() => setUpgradeOpen(true)}><Sparkles size={17} /></button></div>
+        {view === "verification" ? <VerificationWorkspace /> : view === "scan" ? <ScanWorkspace /> : <MapWorkspace />}
       </div>
       {menuOpen && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
       {upgradeOpen && <UpgradeModal onClose={() => setUpgradeOpen(false)} />}

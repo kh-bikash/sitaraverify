@@ -12,16 +12,16 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.includes("localhost") ? "http" : "https");
   const baseUrl = `${protocol}://${host}`;
   return {
-    title: "Vellum — Document & Land Intelligence",
-    description: "Private CPU document restoration and precise land parcel overlays.",
+    title: "Sitaara Verify — Property Verification Intelligence",
+    description: "Three-source property verification across deed OCR, government land records, and technical valuation reports.",
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     openGraph: {
-      title: "Vellum — Document & Land Intelligence",
-      description: "Restore the record. Trace the truth.",
+      title: "Sitaara Verify — Property Verification Intelligence",
+      description: "Verify the deed, land record, valuation and parcel in one decision workspace.",
       type: "website",
-      images: [{ url: `${baseUrl}/og.png`, width: 1672, height: 941, alt: "Vellum document restoration and parcel mapping" }],
+      images: [{ url: `${baseUrl}/og-v2.png`, width: 1672, height: 941, alt: "Sitaara property verification workspace" }],
     },
-    twitter: { card: "summary_large_image", title: "Vellum", description: "Restore the record. Trace the truth.", images: [`${baseUrl}/og.png`] },
+    twitter: { card: "summary_large_image", title: "Sitaara Verify", description: "Three-source property verification intelligence.", images: [`${baseUrl}/og-v2.png`] },
   };
 }
 
