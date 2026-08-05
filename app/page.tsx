@@ -46,6 +46,61 @@ type Corner = [number, number];
 type UploadedDocument = { url: string; clearUrl: string; kind: "pdf" | "image"; name: string; size: string };
 type VerificationStatus = "positive" | "refer" | "negative";
 
+type StoredDocument = {
+  blob: Blob;
+  name: string;
+  type: string;
+  lastModified: number;
+};
+
+const DOCUMENT_DB = "sitaara-private-documents";
+const DOCUMENT_STORE = "active-document";
+
+function openDocumentDatabase() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(DOCUMENT_DB, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DOCUMENT_STORE)) database.createObjectStore(DOCUMENT_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveDocumentLocally(file: File) {
+  const database = await openDocumentDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(DOCUMENT_STORE, "readwrite");
+    transaction.objectStore(DOCUMENT_STORE).put({ blob: file, name: file.name, type: file.type, lastModified: file.lastModified } satisfies StoredDocument, "current");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function readLocalDocument() {
+  const database = await openDocumentDatabase();
+  const record = await new Promise<StoredDocument | undefined>((resolve, reject) => {
+    const request = database.transaction(DOCUMENT_STORE, "readonly").objectStore(DOCUMENT_STORE).get("current");
+    request.onsuccess = () => resolve(request.result as StoredDocument | undefined);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return record ? new File([record.blob], record.name, { type: record.type, lastModified: record.lastModified }) : null;
+}
+
+async function removeLocalDocument() {
+  const database = await openDocumentDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(DOCUMENT_STORE, "readwrite");
+    transaction.objectStore(DOCUMENT_STORE).delete("current");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
 const starterCorners: Corner[] = [
   [25.28806, 82.97291],
   [25.28834, 82.97431],
@@ -135,16 +190,22 @@ function RestoredPage({ showBlocks }: { showBlocks: boolean }) {
 function PdfPagePreview({ document, page, clear, onPageCount }: { document: UploadedDocument; page: number; clear: boolean; onPageCount: (count: number) => void }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const onPageCountRef = useRef(onPageCount);
   onPageCountRef.current = onPageCount;
 
   useEffect(() => {
     let disposed = false;
     let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null;
+    setLoading(true);
+    setImageUrl(null);
+    setErrorMessage(null);
     void import("pdfjs-dist").then(async (pdfjs) => {
       if (disposed) return;
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-      const pdf = await pdfjs.getDocument(document.url).promise;
+      // Keep the worker on the same origin so blob-backed local PDFs render in
+      // development, packaged Sites builds, and strict private deployments.
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      const pdf = await pdfjs.getDocument({ url: document.url }).promise;
       if (disposed) return;
       onPageCountRef.current(pdf.numPages);
       const safePage = Math.min(page, pdf.numPages);
@@ -187,8 +248,11 @@ function PdfPagePreview({ document, page, clear, onPageCount }: { document: Uplo
         setImageUrl(canvas.toDataURL("image/jpeg", clear ? 0.94 : 0.9));
         setLoading(false);
       }
-    }).catch(() => {
-      if (!disposed) setLoading(false);
+    }).catch((error: unknown) => {
+      if (!disposed) {
+        setLoading(false);
+        setErrorMessage(error instanceof Error ? error.message : "Unable to render this PDF");
+      }
     });
     return () => {
       disposed = true;
@@ -201,7 +265,7 @@ function PdfPagePreview({ document, page, clear, onPageCount }: { document: Uplo
       {loading ? <div className="page-render-loading"><ScanLine size={24} /><span>Rendering page {page}</span></div> : imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt={`${clear ? "Cleaned" : "Original"} PDF page ${page}`} />
-      ) : <div className="page-render-loading"><FileText size={24} /><span>Preview unavailable</span></div>}
+      ) : <div className="page-render-loading"><FileText size={24} /><span>Preview unavailable</span>{errorMessage && <small>{errorMessage}</small>}</div>}
       {clear && <div className="enhancement-note"><WandSparkles size={13} /> Background cleaned · ink strengthened · page {page}</div>}
     </div>
   );
@@ -518,8 +582,10 @@ function ScanWorkspace() {
     return canvas.toDataURL("image/jpeg", 0.94);
   };
 
-  const processFile = async (file?: File) => {
+  const processFile = async (file?: File, options: { persist?: boolean; animate?: boolean } = {}) => {
     if (!file) return;
+    const persist = options.persist ?? true;
+    const animate = options.animate ?? true;
     if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
     if (uploadUrlRef.current) URL.revokeObjectURL(uploadUrlRef.current);
     const objectUrl = URL.createObjectURL(file);
@@ -532,12 +598,17 @@ function ScanWorkspace() {
     setPage(1);
     setPageCount(kind === "pdf" ? 1 : 1);
     setUploadedDocument({ url: objectUrl, clearUrl: objectUrl, kind, name: file.name, size });
-    setScanState("processing");
-    setProgress(7);
+    setScanState(animate ? "processing" : "ready");
+    setProgress(animate ? 7 : 100);
+    if (persist) {
+      window.localStorage.removeItem("sitaara-document-empty");
+      void saveDocumentLocally(file).catch(() => undefined);
+    }
     if (kind === "image") {
       const clearUrl = await enhanceImage(file);
       setUploadedDocument({ url: objectUrl, clearUrl: clearUrl || objectUrl, kind, name: file.name, size });
     }
+    if (!animate) return;
     let value = 7;
     const timer = window.setInterval(() => {
       value += Math.ceil(Math.random() * 12);
@@ -550,6 +621,18 @@ function ScanWorkspace() {
     }, 180);
     processingTimerRef.current = timer;
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    void readLocalDocument().then((file) => {
+      if (cancelled) return;
+      if (file) return processFile(file, { persist: false, animate: false });
+      if (window.localStorage.getItem("sitaara-document-empty") === "true") setIsEmpty(true);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+    // The restore runs once whenever the Document Lab workspace mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const removeUpload = () => {
     if (processingTimerRef.current) window.clearInterval(processingTimerRef.current);
@@ -564,6 +647,8 @@ function ScanWorkspace() {
     setIsEmpty(true);
     setPage(1);
     setPageCount(0);
+    window.localStorage.setItem("sitaara-document-empty", "true");
+    void removeLocalDocument().catch(() => undefined);
     if (uploadRef.current) uploadRef.current.value = "";
   };
 
@@ -680,7 +765,7 @@ function ScanWorkspace() {
 
       <div className="document-stage">
         <aside className="page-rail" aria-label="Document pages">
-          <div className="rail-title"><span>Pages</span><strong>08</strong></div>
+          <div className="rail-title"><span>Pages</span><strong>{String(pageCount).padStart(2, "0")}</strong></div>
           {Array.from({ length: Math.min(4, Math.max(1, pageCount)) }, (_, index) => index + 1).map((item) => (
             <button key={item} className={`page-thumb ${page === item ? "active" : ""}`} onClick={() => setPage(item)}>
               <div className="mini-paper"><i /><i /><i /><i /></div>
@@ -881,8 +966,19 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
 
 export default function Home() {
   const [view, setView] = useState<View>("verification");
+  const [viewRestored, setViewRestored] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  useEffect(() => {
+    const savedView = window.localStorage.getItem("sitaara-active-view");
+    if (savedView === "verification" || savedView === "scan" || savedView === "map") setView(savedView);
+    setViewRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (viewRestored) window.localStorage.setItem("sitaara-active-view", view);
+  }, [view, viewRestored]);
 
   return (
     <main className="app-shell">
