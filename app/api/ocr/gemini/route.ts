@@ -1,11 +1,23 @@
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 const MAX_INLINE_BYTES = 19 * 1024 * 1024;
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 type UnknownRecord = Record<string, unknown>;
+
+function bufferToBase64(buffer: ArrayBuffer): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(buffer).toString("base64");
+  }
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -171,7 +183,7 @@ export async function POST(request: Request) {
 
     const model = process.env.GEMINI_OCR_MODEL?.trim() || DEFAULT_MODEL;
     const startedAt = performance.now();
-    const data = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const data = bufferToBase64(await file.arrayBuffer());
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       headers: {
@@ -189,6 +201,7 @@ export async function POST(request: Request) {
         generationConfig: { temperature: 0 },
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(25000),
     });
     const payload = await response.json().catch(() => null) as UnknownRecord | null;
     if (!response.ok) {
