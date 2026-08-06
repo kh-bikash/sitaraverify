@@ -1,0 +1,32 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "surveyNumber": "47/A",
+        "gutNumber": "Gut No. 47/A",
+        "village": "Hinjawadi",
+        "taluka": "Mulshi",
+        "district": "Pune",
+        "state": "Maharashtra",
+        "khataNumber": "7/12 Khata No. 128",
+        "areaSqFt": 24500,
+        "areaAcres": 0.56,
+        "owner": "Suresh Balkrishna Patil"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [73.85600, 18.52100],
+            [73.85750, 18.52150],
+            [73.85710, 18.51980],
+            [73.85560, 18.51930],
+            [73.85600, 18.52100]
+          ]
+        ]
+      }
+    }
+  ]
+}

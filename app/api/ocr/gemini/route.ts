@@ -198,10 +198,20 @@ export async function POST(request: Request) {
             { inline_data: { mime_type: mimeTypeFor(file), data } },
           ],
         }],
-        generationConfig: { temperature: 0 },
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json",
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(45000),
     });
     const payload = await response.json().catch(() => null) as UnknownRecord | null;
     if (!response.ok) {
@@ -210,10 +220,16 @@ export async function POST(request: Request) {
     }
     const candidates = payload && Array.isArray(payload.candidates) ? payload.candidates : [];
     const firstCandidate = isRecord(candidates[0]) ? candidates[0] : null;
+    const finishReason = firstCandidate ? textOrEmpty(firstCandidate.finishReason) : "";
     const content = firstCandidate && isRecord(firstCandidate.content) ? firstCandidate.content : null;
     const parts = content && Array.isArray(content.parts) ? content.parts : [];
     const responseText = parts.map((part) => isRecord(part) ? textOrEmpty(part.text) : "").filter(Boolean).join("\n");
-    if (!responseText) throw new Error("Gemini returned an empty OCR response.");
+    if (!responseText) {
+      if (finishReason && finishReason !== "STOP") {
+        throw new Error(`Gemini candidate stopped due to: ${finishReason}`);
+      }
+      throw new Error("Gemini returned an empty OCR response.");
+    }
     const raw = parseModelJson(responseText);
     const elapsedSeconds = Math.round((performance.now() - startedAt) / 100) / 10;
     return Response.json(normalizeResult(raw, file.name, model, elapsedSeconds), {

@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "surveyNumber": "214/3",
+        "village": "Bhadaini",
+        "tehsil": "Sadar",
+        "district": "Varanasi",
+        "areaSqFt": 1856
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [82.97350, 25.28750],
+            [82.97450, 25.28780],
+            [82.97420, 25.28680],
+            [82.97320, 25.28650],
+            [82.97350, 25.28750]
+          ]
+        ]
+      }
+    }
+  ]
+}

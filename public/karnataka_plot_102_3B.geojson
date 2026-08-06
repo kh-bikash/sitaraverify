@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "surveyNumber": "102/3B",
+        "hissaNumber": "3B",
+        "village": "Yelahanka Hobli",
+        "taluk": "Yelahanka",
+        "district": "Bengaluru Urban",
+        "state": "Karnataka",
+        "rtcNumber": "RTC Form 16 No. 492",
+        "areaSqFt": 18200,
+        "owner": "Ramesh Chandra Rao"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.59520, 13.10120],
+            [77.59640, 13.10140],
+            [77.59620, 13.10010],
+            [77.59500, 13.09990],
+            [77.59520, 13.10120]
+          ]
+        ]
+      }
+    }
+  ]
+}
