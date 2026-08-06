@@ -624,3 +624,19 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(49, 93, 76, 
 .opencv-toolbar h4 { margin: 0; font-size: 10px; color: var(--forest); display: flex; align-items: center; gap: 6px; }
 .opencv-toolbar button { width: 100%; min-height: 32px; font-size: 9px; font-weight: 750; border-radius: 4px; }
 
+/* --- Map Basemap Layer Switcher & GIS Area Audit Card --- */
+.basemap-switcher { display: flex; gap: 4px; background: rgba(14,24,19,.85); padding: 4px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15); backdrop-filter: blur(8px); }
+.basemap-switcher button { border: 0; background: transparent; color: #b5c2b8; padding: 5px 9px; font-size: 8.5px; font-weight: 700; border-radius: 4px; cursor: pointer; transition: all .15s ease; }
+.basemap-switcher button.active { background: var(--acid); color: #16201a; }
+
+.area-audit-card { margin-top: 14px; background: #fdfbf7; border: 1px solid #dcd5c7; border-radius: 6px; padding: 12px; }
+.area-audit-card h4 { margin: 0 0 6px; font-size: 9.5px; color: var(--forest); display: flex; align-items: center; justify-content: space-between; }
+.area-audit-status { font-size: 8.5px; font-weight: 800; padding: 2px 7px; border-radius: 3px; }
+.area-audit-status.match { background: #e8f5e9; color: #2e7d32; }
+.area-audit-status.overrun { background: #fff3e0; color: #e65100; }
+.area-audit-row { display: flex; justify-content: space-between; font-size: 9px; margin-top: 4px; color: var(--muted); }
+.area-audit-row strong { color: var(--ink); }
+
+.map-parsed-button { margin-top: 12px; width: 100%; justify-content: center; font-size: 10px; font-weight: 750; gap: 6px; background: var(--forest); color: var(--acid); }
+
+
