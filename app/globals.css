@@ -639,4 +639,86 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(49, 93, 76, 
 
 .map-parsed-button { margin-top: 12px; width: 100%; justify-content: center; font-size: 10px; font-weight: 750; gap: 6px; background: var(--forest); color: var(--acid); }
 
+/* --- Drag Whole Plot Center Marker --- */
+.plot-center-marker { background: transparent; border: 0; }
+.plot-center-marker span {
+  background: #1e3328;
+  color: var(--acid);
+  border: 1.5px solid var(--acid);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  cursor: move;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: transform .15s ease, background .15s ease;
+}
+.plot-center-marker span:hover {
+  background: var(--forest);
+  transform: scale(1.05);
+}
+
+/* --- Dashboard & Process Workspace Styles --- */
+.dashboard-workspace { min-height: 100vh; background: #eceee9; padding: 30px clamp(22px, 3vw, 48px) 52px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi-card { background: #fffefa; border: 1px solid #d2d7d1; border-radius: 7px; padding: 18px 20px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; }
+.kpi-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.kpi-card-head span { font: 8px var(--font-geist-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.kpi-card-icon { width: 34px; height: 34px; border-radius: 6px; background: #e0e8e1; color: var(--forest); display: grid; place-items: center; }
+.kpi-card strong { font-size: 24px; font-family: var(--font-geist-mono); letter-spacing: -.04em; line-height: 1; display: block; margin-top: 4px; }
+.kpi-card p { margin: 8px 0 0; font-size: 9px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.kpi-card-accent { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
+
+.process-monitor-panel { background: #f9f9f5; border: 1px solid #d1d6d0; border-radius: 7px; overflow: hidden; }
+.panel-header { min-height: 64px; padding: 15px 20px; border-bottom: 1px solid #d7dbd6; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: #fff; }
+.panel-header h2 { font-size: 14px; margin: 0; letter-spacing: -.02em; }
+.panel-header p { margin: 3px 0 0; color: var(--muted); font-size: 8.5px; }
+
+.process-filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.process-filter-tabs button { border: 1px solid #d0d5cf; background: #f4f6f3; padding: 5px 11px; border-radius: 5px; font-size: 9px; font-weight: 650; cursor: pointer; color: #555c56; transition: .15s ease; }
+.process-filter-tabs button:hover { border-color: var(--forest); color: var(--ink); }
+.process-filter-tabs button.active { background: var(--forest); color: #fff; border-color: var(--forest); }
+
+.process-table-wrap { overflow-x: auto; }
+.process-table { width: 100%; border-collapse: collapse; text-align: left; min-width: 900px; }
+.process-table th { background: #1f3457; color: #fff; padding: 11px 14px; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.process-table td { padding: 12px 14px; border-bottom: 1px solid #e0e4df; font-size: 10px; vertical-align: middle; background: #fff; }
+.process-table tr:hover td { background: #f7f9f6; }
+
+.process-id-cell { display: flex; flex-direction: column; gap: 2px; }
+.process-id-cell strong { font-size: 11px; color: var(--ink); }
+.process-id-cell span { font-size: 8px; color: var(--muted); text-transform: uppercase; }
+
+.process-status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.process-status-pill.active { background: #e3f2fd; color: #0d47a1; border: 1px solid #90caf9; }
+.process-status-pill.completed { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; }
+.process-status-pill.review { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
+.process-status-pill.queued { background: #f5f5f5; color: #616161; border: 1px solid #e0e0e0; }
+
+.process-progress-bar { width: 110px; height: 5px; background: #e0e4df; border-radius: 6px; overflow: hidden; display: flex; }
+.process-progress-bar i { height: 100%; background: var(--forest); transition: width .3s ease; }
+
+.doc-type-badge { display: inline-block; font-size: 8px; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: #eef2ed; color: var(--forest); border: 1px solid #c7d2c9; }
+
+.records-filter-panel { background: #fffefa; border: 1px solid #d1d6d0; border-radius: 7px; padding: 16px 18px; margin-bottom: 16px; }
+.records-filter-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.records-search-input { flex: 1 1 240px; position: relative; min-width: 200px; }
+.records-search-input svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.records-search-input input { width: 100%; height: 38px; padding: 0 12px 0 36px; border: 1px solid #cbd0ca; border-radius: 6px; background: #fff; font-size: 11px; }
+.records-search-input input:focus { border-color: var(--forest); outline: none; }
+
+.filter-select { height: 38px; border: 1px solid #cbd0ca; border-radius: 6px; background: #fff; padding: 0 24px 0 10px; font-size: 10px; font-weight: 650; color: var(--ink); cursor: pointer; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%23315d4c' viewBox='0 0 16 16'><path d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; }
+
+@media (max-width: 1100px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+}
+
+
 

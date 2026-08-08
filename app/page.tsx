@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Map as LeafletMap, Polygon as LeafletPolygon } from "leaflet";
 import {
+  Activity,
   AlertTriangle,
   ArrowDownToLine,
   ArrowLeftRight,
@@ -11,17 +12,22 @@ import {
   BookOpen,
   Bot,
   Check,
+  CheckCircle2,
   ChevronRight,
   CircleHelp,
   CircleCheck,
   CircleX,
+  Clock,
+  Cpu,
   Database,
   FileJson,
   FileText,
   Focus,
+  Layers,
   Layers3,
   Languages,
   LayoutDashboard,
+  ListFilter,
   MapPinned,
   Maximize2,
   Menu,
@@ -36,10 +42,11 @@ import {
   Upload,
   WandSparkles,
   X,
+  Zap,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
-type View = "verification" | "scan" | "map" | "records" | "processing" | "preferences" | "help";
+type View = "dashboard" | "verification" | "scan" | "map" | "records" | "processing" | "preferences" | "help";
 type ScanState = "ready" | "processing" | "error";
 type Corner = [number, number];
 type UploadedDocument = { url: string; clearUrl: string; kind: "pdf" | "image"; name: string; size: string };
@@ -372,7 +379,7 @@ function EmptyDocument({ onUpload, clear = false }: { onUpload: () => void; clea
     <button className="empty-document" onClick={onUpload}>
       <div className="empty-document-icon">{clear ? <WandSparkles size={24} /> : <Upload size={24} />}</div>
       <strong>{clear ? "Your clear document appears here" : "Drop in a PDF or image"}</strong>
-      <span>{clear ? "Vellum preserves page order, spacing, and searchable text." : "PDF, PNG, JPG or TIFF · up to 100 MB"}</span>
+      <span>{clear ? "Clean document preview." : "PDF, PNG, JPG or TIFF · up to 100 MB"}</span>
       {!clear && <b>Choose document</b>}
     </button>
   );
@@ -1202,6 +1209,7 @@ function ParcelMap({
   areaSqFt = 1856,
   basemap = "osm",
   onCornerChange,
+  onPlotShift,
 }: {
   opacity: number;
   corners: Corner[];
@@ -1209,28 +1217,37 @@ function ParcelMap({
   areaSqFt?: number;
   basemap?: "osm" | "satellite";
   onCornerChange: (index: number, value: Corner) => void;
+  onPlotShift?: (newCorners: Corner[]) => void;
 }) {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const polygonRef = useRef<LeafletPolygon | null>(null);
   const tileLayerRef = useRef<unknown | null>(null);
   const markersRef = useRef<unknown[]>([]);
+  const centerMarkerRef = useRef<unknown | null>(null);
   const callbackRef = useRef(onCornerChange);
+  const shiftCallbackRef = useRef(onPlotShift);
+  const cornersRef = useRef(corners);
   const initialCornersRef = useRef(corners);
   const initialOpacityRef = useRef(opacity);
+  const lastCentroidRef = useRef<Corner>([0, 0]);
 
   useEffect(() => {
     callbackRef.current = onCornerChange;
-  }, [onCornerChange]);
+    shiftCallbackRef.current = onPlotShift;
+    cornersRef.current = corners;
+  }, [onCornerChange, onPlotShift, corners]);
 
   useEffect(() => {
     if (!mapElement.current || mapRef.current) return;
     let disposed = false;
     void import("leaflet").then((L) => {
       if (disposed || !mapElement.current || mapRef.current) return;
-      const centerLat = initialCornersRef.current[0]?.[0] || 18.5204;
-      const centerLng = initialCornersRef.current[0]?.[1] || 73.8567;
-      const map = L.map(mapElement.current, { zoomControl: false, attributionControl: true }).setView([centerLat, centerLng], 17);
+      const initialCentroidLat = initialCornersRef.current.reduce((s, c) => s + c[0], 0) / (initialCornersRef.current.length || 1) || 18.5204;
+      const initialCentroidLng = initialCornersRef.current.reduce((s, c) => s + c[1], 0) / (initialCornersRef.current.length || 1) || 73.8567;
+      lastCentroidRef.current = [initialCentroidLat, initialCentroidLng];
+
+      const map = L.map(mapElement.current, { zoomControl: false, attributionControl: true }).setView([initialCentroidLat, initialCentroidLng], 17);
 
       const tileUrl = basemap === "satellite"
         ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -1245,6 +1262,7 @@ function ParcelMap({
       L.control.zoom({ position: "bottomright" }).addTo(map);
       const polygon = L.polygon(initialCornersRef.current, { color: "#e8ff86", weight: 3, fillColor: "#486857", fillOpacity: initialOpacityRef.current }).addTo(map);
       polygon.bindTooltip(`Survey ${surveyNumber || "47/A"} · ${areaSqFt.toLocaleString()} sq.ft`, { permanent: true, direction: "center", className: "parcel-label" });
+
       const markers = initialCornersRef.current.map((corner, index) => {
         const marker = L.marker(corner, {
           draggable: true,
@@ -1257,6 +1275,27 @@ function ParcelMap({
         return marker;
       });
       markersRef.current = markers;
+
+      // Whole Plot Center Drag Anchor
+      const centerMarker = L.marker([initialCentroidLat, initialCentroidLng], {
+        draggable: true,
+        icon: L.divIcon({ className: "plot-center-marker", html: `<span>📍 Select & Drag Plot</span>`, iconSize: [110, 26], iconAnchor: [55, 13] }),
+      }).addTo(map);
+
+      centerMarker.on("drag", () => {
+        const newPos = centerMarker.getLatLng();
+        const prev = lastCentroidRef.current;
+        const dLat = newPos.lat - prev[0];
+        const dLng = newPos.lng - prev[1];
+        const shiftedCorners: Corner[] = cornersRef.current.map(([lat, lng]) => [lat + dLat, lng + dLng]);
+        lastCentroidRef.current = [newPos.lat, newPos.lng];
+        cornersRef.current = shiftedCorners;
+        if (shiftCallbackRef.current) {
+          shiftCallbackRef.current(shiftedCorners);
+        }
+      });
+      centerMarkerRef.current = centerMarker;
+
       map.fitBounds(polygon.getBounds(), { padding: [65, 65] });
       mapRef.current = map;
       polygonRef.current = polygon;
@@ -1294,12 +1333,15 @@ function ParcelMap({
         (marker as { setLatLng: (pt: Corner) => void }).setLatLng(corners[index]);
       }
     });
-    void import("leaflet").then((L) => {
-      if (mapRef.current && corners.length > 0) {
-        const bounds = L.latLngBounds(corners);
-        mapRef.current.fitBounds(bounds, { padding: [65, 65] });
+
+    if (corners.length > 0) {
+      const cLat = corners.reduce((s, c) => s + c[0], 0) / corners.length;
+      const cLng = corners.reduce((s, c) => s + c[1], 0) / corners.length;
+      lastCentroidRef.current = [cLat, cLng];
+      if (centerMarkerRef.current && typeof centerMarkerRef.current === "object" && "setLatLng" in centerMarkerRef.current) {
+        (centerMarkerRef.current as { setLatLng: (pt: Corner) => void }).setLatLng([cLat, cLng]);
       }
-    });
+    }
   }, [corners]);
 
   useEffect(() => {
@@ -1614,7 +1656,15 @@ Verified by Sitaara Intelligence Platform
         </aside>
 
         <div className="map-canvas-wrap">
-          <ParcelMap opacity={opacity} corners={corners} surveyNumber={surveyNumber} areaSqFt={areaSqFt} basemap={basemap} onCornerChange={updateCorner} />
+          <ParcelMap
+            opacity={opacity}
+            corners={corners}
+            surveyNumber={surveyNumber}
+            areaSqFt={areaSqFt}
+            basemap={basemap}
+            onCornerChange={updateCorner}
+            onPlotShift={(newCorners) => setCorners(newCorners)}
+          />
           <div className="map-floating-top">
             <div><Focus size={15} /><span>Drag numbered corners to align</span></div>
             <button aria-label="Full screen map" onClick={() => document.querySelector<HTMLElement>(".map-canvas-wrap")?.requestFullscreen?.()}><Maximize2 size={16} /></button>
@@ -1648,14 +1698,848 @@ Verified by Sitaara Intelligence Platform
   );
 }
 
-function UtilityWorkspace({ view, onNavigate }: { view: Exclude<View, "verification" | "scan" | "map">; onNavigate: (view: View) => void }) {
+type ProcessCategory = "all" | "ocr" | "geo" | "sync" | "review" | "report";
+type ProcessStatus = "active" | "completed" | "review" | "queued" | "failed";
+
+type ProcessItem = {
+  id: string;
+  name: string;
+  category: ProcessCategory;
+  categoryLabel: string;
+  target: string;
+  status: ProcessStatus;
+  progress: number;
+  location: string;
+  latency: string;
+  details: string;
+  timestamp: string;
+  confidence?: number;
+};
+
+const initialProcesses: ProcessItem[] = [
+  {
+    id: "PROC-OCR-001",
+    name: "Gemini 3.6 Multilingual OCR Engine",
+    category: "ocr",
+    categoryLabel: "OCR & Text",
+    target: "Meera_Sharma_SaleDeed_Scan.pdf",
+    status: "active",
+    progress: 84,
+    location: "Varanasi, UP",
+    latency: "1.4s",
+    details: "Parsing Hindi & Devanagari script layout blocks (8 lines pending)",
+    timestamp: "Just now",
+    confidence: 94.2,
+  },
+  {
+    id: "PROC-GEO-002",
+    name: "Cadastral Plot Map Overlay Sync",
+    category: "geo",
+    categoryLabel: "Geo Spatial",
+    target: "Survey No. 118 / 2B (Sampigehalli)",
+    status: "completed",
+    progress: 100,
+    location: "Bengaluru, KA",
+    latency: "0.8s",
+    details: "Matched OpenStreetMap parcel boundary with KA revenue records (±2.4m)",
+    timestamp: "2 mins ago",
+    confidence: 99.0,
+  },
+  {
+    id: "PROC-SYNC-003",
+    name: "Government Registry Cross-Verification",
+    category: "sync",
+    categoryLabel: "Govt Sync",
+    target: "UP Bhulekh Portal (Tehsil Sadar)",
+    status: "active",
+    progress: 65,
+    location: "Varanasi, UP",
+    latency: "2.1s",
+    details: "Comparing recorded owner and boundary directions against seller deed",
+    timestamp: "Just now",
+  },
+  {
+    id: "PROC-HW-004",
+    name: "Handwriting & Unclear Ink Review",
+    category: "review",
+    categoryLabel: "Analyst Review",
+    target: "Page 1 Line 6 (MR 42 / 2024-25)",
+    status: "review",
+    progress: 40,
+    location: "Sampigehalli, KA",
+    latency: "Manual",
+    details: "Unclear cursive Hindi text flagged for analyst confirmation before export",
+    timestamp: "5 mins ago",
+    confidence: 62.0,
+  },
+  {
+    id: "PROC-PDF-005",
+    name: "Print-to-PDF Report Generator",
+    category: "report",
+    categoryLabel: "Reporting",
+    target: "SHFL0021847-property-verification.pdf",
+    status: "completed",
+    progress: 100,
+    location: "System Storage",
+    latency: "0.5s",
+    details: "Generated 3-source matrix comparison with legal caveats and score stamp",
+    timestamp: "12 mins ago",
+  },
+  {
+    id: "PROC-CV-006",
+    name: "OpenCV Background Cleaning",
+    category: "ocr",
+    categoryLabel: "Vision Prep",
+    target: "Raw_Scan_Page1_Original.jpg",
+    status: "completed",
+    progress: 100,
+    location: "Browser Local",
+    latency: "0.3s",
+    details: "Cleaned paper stains, strengthened blue ink signatures locally",
+    timestamp: "15 mins ago",
+  },
+];
+
+type RecordItem = {
+  id: string;
+  applicant: string;
+  property: string;
+  khasra: string;
+  village: string;
+  tehsil: string;
+  district: string;
+  state: "UP" | "KA" | "MH" | "DL" | "HR";
+  docType: "Sale Deed" | "Khatauni / RTC" | "Mutation Order" | "Cadastral Map";
+  status: "positive" | "refer" | "negative" | "pending";
+  confidence: number;
+  date: string;
+  hasHandwritingReview: boolean;
+};
+
+const initialRecords: RecordItem[] = [
+  {
+    id: "SHFL0021847",
+    applicant: "Meera Sharma",
+    property: "Khasra 214/3 · 1,856 sq.ft",
+    khasra: "214/3",
+    village: "Bhadaini",
+    tehsil: "Sadar",
+    district: "Varanasi",
+    state: "UP",
+    docType: "Sale Deed",
+    status: "refer",
+    confidence: 94.2,
+    date: "2026-08-07",
+    hasHandwritingReview: true,
+  },
+  {
+    id: "OCR-AJAI-ATS",
+    applicant: "Arjun Gupta",
+    property: "Survey 118/2B · 1.42 Acres",
+    khasra: "118/2B",
+    village: "Sampigehalli",
+    tehsil: "Yelahanka",
+    district: "Bengaluru Rural",
+    state: "KA",
+    docType: "Sale Deed",
+    status: "positive",
+    confidence: 88.0,
+    date: "2026-08-06",
+    hasHandwritingReview: true,
+  },
+  {
+    id: "PV-2026-0412",
+    applicant: "Ramesh & Sangeeta Patel",
+    property: "Gat No. 412 · 2.5 Hectares",
+    khasra: "Gat 412",
+    village: "Wagholi",
+    tehsil: "Haveli",
+    district: "Pune",
+    state: "MH",
+    docType: "Mutation Order",
+    status: "pending",
+    confidence: 76.5,
+    date: "2026-08-05",
+    hasHandwritingReview: false,
+  },
+  {
+    id: "DL-REG-8821",
+    applicant: "Vikramjit Singh",
+    property: "Plot 45, Sector B · 2,400 sq.ft",
+    khasra: "Plot 45",
+    village: "Vasant Kunj",
+    tehsil: "Mehrauli",
+    district: "New Delhi",
+    state: "DL",
+    docType: "Khatauni / RTC",
+    status: "positive",
+    confidence: 99.1,
+    date: "2026-08-04",
+    hasHandwritingReview: false,
+  },
+  {
+    id: "HR-GUR-3310",
+    applicant: "Anita Choudhary",
+    property: "Khewat 128 / Mustatil 42",
+    khasra: "Khewat 128",
+    village: "Karsola",
+    tehsil: "Manesar",
+    district: "Gurugram",
+    state: "HR",
+    docType: "Cadastral Map",
+    status: "refer",
+    confidence: 82.4,
+    date: "2026-08-03",
+    hasHandwritingReview: true,
+  },
+  {
+    id: "UP-LKO-9941",
+    applicant: "Shashi & Ajay Singh",
+    property: "Plot 631/80, Sharda Nagar",
+    khasra: "631/80",
+    village: "Sector 11",
+    tehsil: "Indira Nagar",
+    district: "Lucknow",
+    state: "UP",
+    docType: "Sale Deed",
+    status: "positive",
+    confidence: 96.8,
+    date: "2026-08-02",
+    hasHandwritingReview: false,
+  },
+  {
+    id: "KA-BLR-5521",
+    applicant: "A. Narayanappa",
+    property: "Survey 117 · 3.10 Acres",
+    khasra: "117",
+    village: "Sampigehalli",
+    tehsil: "Yelahanka",
+    district: "Bengaluru Urban",
+    state: "KA",
+    docType: "Khatauni / RTC",
+    status: "positive",
+    confidence: 91.5,
+    date: "2026-08-01",
+    hasHandwritingReview: false,
+  },
+  {
+    id: "MH-MUM-1104",
+    applicant: "Rajeshwar Rao",
+    property: "Plot 88, Majiwada · 1,200 sq.ft",
+    khasra: "Plot 88",
+    village: "Majiwada",
+    tehsil: "Thane",
+    district: "Thane",
+    state: "MH",
+    docType: "Mutation Order",
+    status: "negative",
+    confidence: 64.2,
+    date: "2026-07-30",
+    hasHandwritingReview: true,
+  },
+];
+
+function DashboardWorkspace({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const [processes, setProcesses] = useState<ProcessItem[]>(initialProcesses);
+  const [categoryFilter, setCategoryFilter] = useState<ProcessCategory>("all");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedPayload, setSelectedPayload] = useState<ProcessItem | null>(null);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    setTimeout(() => {
+      setProcesses((prev) =>
+        prev.map((proc) => {
+          if (proc.status === "active") {
+            const nextProgress = Math.min(100, proc.progress + 15);
+            return {
+              ...proc,
+              progress: nextProgress,
+              status: nextProgress === 100 ? "completed" : "active",
+              timestamp: "Just now",
+            };
+          }
+          return proc;
+        })
+      );
+      setIsRefreshing(false);
+    }, 600);
+  };
+
+  const filteredProcesses = processes.filter((proc) => {
+    if (categoryFilter === "all") return true;
+    return proc.category === categoryFilter;
+  });
+
+  const activeCount = processes.filter((p) => p.status === "active").length;
+  const reviewCount = processes.filter((p) => p.status === "review").length;
+
+  return (
+    <section className="dashboard-workspace" aria-labelledby="dashboard-title">
+      <header className="workspace-header">
+        <div>
+          <div className="eyebrow">
+            <span className="live-dot" /> System Dashboard
+          </div>
+          <h1 id="dashboard-title">
+            System <em>Dashboard</em>
+          </h1>
+          <p style={{ marginTop: 6, color: "var(--muted)", fontSize: 11, lineHeight: 1.5, maxWidth: 600 }}>
+            Monitor active OCR pipelines, state portal syncs, and verification tasks.
+          </p>
+        </div>
+        <div className="header-actions">
+          <button className="button button-ghost" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw size={14} className={isRefreshing ? "spinning" : ""} /> {isRefreshing ? "Syncing..." : "Sync processes"}
+          </button>
+          <button className="button button-primary" onClick={() => onNavigate("scan")}>
+            <ScanLine size={14} /> Run Document OCR
+          </button>
+        </div>
+      </header>
+
+      {/* KPI Cards */}
+      <div className="kpi-grid" style={{ marginBottom: 24 }}>
+        <div className="kpi-card">
+          <div className="kpi-card-head">
+            <span>System Tasks</span>
+            <div className="kpi-card-icon"><Activity size={18} /></div>
+          </div>
+          <strong>{processes.length} Processes</strong>
+          <p><Clock size={11} /> {activeCount} active · {reviewCount} action required</p>
+          <div className="kpi-card-accent" style={{ background: "var(--forest)" }} />
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-card-head">
+            <span>Gemini OCR Health</span>
+            <div className="kpi-card-icon" style={{ background: "#e3f2fd", color: "#0d47a1" }}><Cpu size={18} /></div>
+          </div>
+          <strong>98.4% Accuracy</strong>
+          <p><Zap size={11} /> gemini-3.6-flash · 1.4s avg latency</p>
+          <div className="kpi-card-accent" style={{ background: "#1976d2" }} />
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-card-head">
+            <span>Property Register</span>
+            <div className="kpi-card-icon" style={{ background: "#f3e5f5", color: "#7b1fa2" }}><Database size={18} /></div>
+          </div>
+          <strong>24 Cases</strong>
+          <p><BadgeCheck size={11} /> 18 Approved · 4 Referral · 2 Pending</p>
+          <div className="kpi-card-accent" style={{ background: "#8e24aa" }} />
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-card-head">
+            <span>State Portal Connectors</span>
+            <div className="kpi-card-icon" style={{ background: "#fff3e0", color: "#e65100" }}><Layers size={18} /></div>
+          </div>
+          <strong>3 Connected</strong>
+          <p><CheckCircle2 size={11} /> UP Bhulekh, KA Kaveri, MH Mahabhulekh</p>
+          <div className="kpi-card-accent" style={{ background: "#f57c00" }} />
+        </div>
+      </div>
+
+      {/* Main Process Section */}
+      <div className="process-monitor-panel">
+        <div className="panel-header">
+          <div>
+            <h2><Activity size={16} style={{ color: "var(--forest)", display: "inline", verticalAlign: "-2px" }} /> Process Monitor</h2>
+            <p>Track background execution threads and OCR pipelines.</p>
+          </div>
+          <div className="process-filter-tabs">
+            {[
+              ["all", `All Processes (${processes.length})`],
+              ["ocr", "OCR & Text"],
+              ["geo", "Geo Spatial"],
+              ["sync", "Govt Sync"],
+              ["review", "Analyst Review"],
+              ["report", "Reports"],
+            ].map(([cat, label]) => (
+              <button
+                key={cat}
+                className={categoryFilter === cat ? "active" : ""}
+                onClick={() => setCategoryFilter(cat as ProcessCategory)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="process-table-wrap">
+          <table className="process-table">
+            <thead>
+              <tr>
+                <th>Process ID & Name</th>
+                <th>Category</th>
+                <th>Target Resource</th>
+                <th>State / Region</th>
+                <th>Progress & Status</th>
+                <th>Performance</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProcesses.map((proc) => (
+                <tr key={proc.id}>
+                  <td>
+                    <div className="process-id-cell">
+                      <strong>{proc.name}</strong>
+                      <span>{proc.id} · {proc.timestamp}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="doc-type-badge">{proc.categoryLabel}</span>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: 10, fontWeight: 600 }}>{proc.target}</span>
+                  </td>
+                  <td>
+                    <span style={{ font: "8px var(--font-geist-mono)", color: "var(--muted)" }}>{proc.location}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span
+                          className={`process-status-pill ${
+                            proc.status === "active"
+                              ? "active"
+                              : proc.status === "completed"
+                              ? "completed"
+                              : proc.status === "review"
+                              ? "review"
+                              : "queued"
+                          }`}
+                        >
+                          {proc.status === "active" && <RefreshCw size={10} className="spinning" />}
+                          {proc.status === "completed" && <CheckCircle2 size={10} />}
+                          {proc.status === "review" && <AlertTriangle size={10} />}
+                          {proc.status}
+                        </span>
+                        <span style={{ font: "9px var(--font-geist-mono)", fontWeight: 700 }}>{proc.progress}%</span>
+                      </div>
+                      <div className="process-progress-bar">
+                        <i style={{ width: `${proc.progress}%` }} />
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ fontSize: 9, color: "var(--muted)" }}>
+                      <div>Latency: <strong>{proc.latency}</strong></div>
+                      {proc.confidence !== undefined && <div>Confidence: <strong style={{ color: proc.confidence < 70 ? "#9b542d" : "var(--forest)" }}>{proc.confidence}%</strong></div>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="button button-ghost" style={{ minHeight: 28, padding: "0 8px", fontSize: 9 }} onClick={() => setSelectedPayload(proc)}>
+                        Inspect
+                      </button>
+                      <button
+                        className="button button-primary"
+                        style={{ minHeight: 28, padding: "0 8px", fontSize: 9 }}
+                        onClick={() => {
+                          if (proc.category === "ocr") onNavigate("scan");
+                          else if (proc.category === "geo") onNavigate("map");
+                          else onNavigate("verification");
+                        }}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Smart AI Insights & System Log */}
+      <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div style={{ background: "#fffefa", border: "1px solid #d1d6d0", borderRadius: 7, padding: 20 }}>
+          <h3 style={{ margin: "0 0 12px", fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <Sparkles size={16} style={{ color: "var(--forest)" }} /> Smart AI Operations & Anomaly Detection
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ padding: 12, border: "1px solid #ffe0b2", background: "#fff8e1", borderRadius: 6, display: "flex", gap: 10 }}>
+              <AlertTriangle size={16} style={{ color: "#e65100", flex: "0 0 auto", marginTop: 2 }} />
+              <div>
+                <strong style={{ fontSize: 11, display: "block", color: "#e65100" }}>Access Width Variance Flagged</strong>
+                <span style={{ fontSize: 9, color: "#616161", lineHeight: 1.4, display: "block", marginTop: 3 }}>
+                  Case SHFL0021847 (Varanasi): Deed records 18 ft Municipal lane while UP Portal records 20 ft lane. Within 2 ft tolerance limits.
+                </span>
+              </div>
+            </div>
+
+            <div style={{ padding: 12, border: "1px solid #c8e6c9", background: "#e8f5e9", borderRadius: 6, display: "flex", gap: 10 }}>
+              <CheckCircle2 size={16} style={{ color: "#2e7d32", flex: "0 0 auto", marginTop: 2 }} />
+              <div>
+                <strong style={{ fontSize: 11, display: "block", color: "#2e7d32" }}>Cadastral Plot Alignment High Precision</strong>
+                <span style={{ fontSize: 9, color: "#616161", lineHeight: 1.4, display: "block", marginTop: 3 }}>
+                  Survey No. 118/2B (Sampigehalli) overlay matched to OpenStreetMap basemap with ±2.4m coordinate deviation.
+                </span>
+              </div>
+            </div>
+
+            <div style={{ padding: 12, border: "1px solid #bbdefb", background: "#e3f2fd", borderRadius: 6, display: "flex", gap: 10 }}>
+              <Zap size={16} style={{ color: "#1565c0", flex: "0 0 auto", marginTop: 2 }} />
+              <div>
+                <strong style={{ fontSize: 11, display: "block", color: "#1565c0" }}>Gemini 3.6 Flash Active</strong>
+                <span style={{ fontSize: 9, color: "#616161", lineHeight: 1.4, display: "block", marginTop: 3 }}>
+                  Server-side vision model initialized. Multi-script Devanagari and Kannada OCR tuned for land registry vellum papers.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Event Activity Stream */}
+        <div style={{ background: "#fffefa", border: "1px solid #d1d6d0", borderRadius: 7, padding: 20 }}>
+          <h3 style={{ margin: "0 0 12px", fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <Clock size={16} style={{ color: "var(--forest)" }} /> Real-Time Process Activity Feed
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {[
+              ["Just now", "Gemini OCR completed block layout parsing for Page 1 of Meera_Sharma_SaleDeed.pdf"],
+              ["2 mins ago", "OpenStreetMap cadastral polygon pinned for Survey 118/2B (Sampigehalli)"],
+              ["5 mins ago", "Analyst confirmed handwritten seller name 'Arjun Kumar Gupta' on line 6"],
+              ["12 mins ago", "PDF Report SHFL0021847-property-verification.pdf exported with 3-source matrix"],
+              ["18 mins ago", "Government portal UP Bhulekh sync query returned 99.4% owner name match"],
+            ].map(([time, text], idx) => (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 10, fontSize: 9, paddingBottom: 8, borderBottom: idx < 4 ? "1px solid #e0e4df" : "none" }}>
+                <span style={{ font: "8px var(--font-geist-mono)", color: "var(--forest)", fontWeight: 700 }}>{time}</span>
+                <span style={{ color: "var(--ink)", lineHeight: 1.4 }}>{text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Payload Inspection Modal */}
+      {selectedPayload && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Process payload inspection">
+          <div className="upgrade-modal" style={{ maxWidth: 580 }}>
+            <button className="modal-close" onClick={() => setSelectedPayload(null)} aria-label="Close"><X size={18} /></button>
+            <div className="modal-copy">
+              <div className="eyebrow"><Activity size={13} /> {selectedPayload.id}</div>
+              <h2 style={{ fontSize: 20 }}>{selectedPayload.name}</h2>
+              <p>{selectedPayload.details}</p>
+            </div>
+            <div style={{ background: "#202421", color: "#dfff6d", padding: 14, borderRadius: 6, font: "9px var(--font-geist-mono)", overflowX: "auto", marginTop: 14 }}>
+              <pre style={{ margin: 0 }}>
+{JSON.stringify(
+  {
+    processId: selectedPayload.id,
+    name: selectedPayload.name,
+    category: selectedPayload.category,
+    status: selectedPayload.status,
+    progress: `${selectedPayload.progress}%`,
+    targetResource: selectedPayload.target,
+    location: selectedPayload.location,
+    latency: selectedPayload.latency,
+    confidence: selectedPayload.confidence ? `${selectedPayload.confidence}%` : "N/A",
+    systemTimestamp: new Date().toISOString(),
+  },
+  null,
+  2
+)}
+              </pre>
+            </div>
+            <button className="button button-primary" style={{ marginTop: 14, width: "100%" }} onClick={() => setSelectedPayload(null)}>
+              Close inspector
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RecordsWorkspace({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const [recordsList] = useState<RecordItem[]>(initialRecords);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [docTypeFilter, setDocTypeFilter] = useState<string>("all");
+  const [confidenceFilter, setConfidenceFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("newest");
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+
+  const filteredRecords = recordsList.filter((rec) => {
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      const matchQ =
+        rec.id.toLowerCase().includes(q) ||
+        rec.applicant.toLowerCase().includes(q) ||
+        rec.property.toLowerCase().includes(q) ||
+        rec.khasra.toLowerCase().includes(q) ||
+        rec.village.toLowerCase().includes(q) ||
+        rec.district.toLowerCase().includes(q);
+      if (!matchQ) return false;
+    }
+    if (stateFilter !== "all" && rec.state !== stateFilter) return false;
+    if (statusFilter !== "all" && rec.status !== statusFilter) return false;
+    if (docTypeFilter !== "all" && rec.docType !== docTypeFilter) return false;
+    if (confidenceFilter === "high" && rec.confidence < 85) return false;
+    if (confidenceFilter === "review" && rec.confidence >= 85) return false;
+    return true;
+  }).sort((a, b) => {
+    if (sortBy === "newest") return new Date(b.date).getTime() - new Date(a.date).getTime();
+    if (sortBy === "oldest") return new Date(a.date).getTime() - new Date(b.date).getTime();
+    if (sortBy === "confidence") return b.confidence - a.confidence;
+    if (sortBy === "applicant") return a.applicant.localeCompare(b.applicant);
+    return 0;
+  });
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    stateFilter !== "all" ||
+    statusFilter !== "all" ||
+    docTypeFilter !== "all" ||
+    confidenceFilter !== "all" ||
+    sortBy !== "newest";
+
+  const clearAllFilters = () => {
+    setSearch("");
+    setStateFilter("all");
+    setStatusFilter("all");
+    setDocTypeFilter("all");
+    setConfidenceFilter("all");
+    setSortBy("newest");
+  };
+
+  return (
+    <section className="utility-workspace" aria-labelledby="records-title">
+      <header className="utility-header" style={{ maxWidth: 1510 }}>
+        <div className="eyebrow"><BookOpen size={13} /> Property Register</div>
+        <h1 id="records-title">Property Records</h1>
+        <p>Search and filter registered land deeds, mutation entries, and verification cases.</p>
+      </header>
+
+      {/* FILTER CONTROLS TOOLBAR */}
+      <div className="records-filter-panel">
+        <div className="records-filter-row">
+          {/* Search Box */}
+          <div className="records-search-input">
+            <Search size={15} />
+            <input
+              type="text"
+              placeholder="Search by Applicant, Case ID, Khasra, Village, or District..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* State Filter */}
+          <select className="filter-select" value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+            <option value="all">All States</option>
+            <option value="UP">Uttar Pradesh (UP)</option>
+            <option value="KA">Karnataka (KA)</option>
+            <option value="MH">Maharashtra (MH)</option>
+            <option value="DL">Delhi NCR (DL)</option>
+            <option value="HR">Haryana (HR)</option>
+          </select>
+
+          {/* Status Filter */}
+          <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">All Statuses</option>
+            <option value="positive">Positive (Approved)</option>
+            <option value="refer">Refer (Review Required)</option>
+            <option value="pending">Pending Review</option>
+            <option value="negative">Negative (Rejected)</option>
+          </select>
+
+          {/* Document Type Filter */}
+          <select className="filter-select" value={docTypeFilter} onChange={(e) => setDocTypeFilter(e.target.value)}>
+            <option value="all">All Document Types</option>
+            <option value="Sale Deed">Sale Deed</option>
+            <option value="Khatauni / RTC">Khatauni / RTC</option>
+            <option value="Mutation Order">Mutation Order</option>
+            <option value="Cadastral Map">Cadastral Map</option>
+          </select>
+
+          {/* Confidence Level Filter */}
+          <select className="filter-select" value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
+            <option value="all">All Confidence</option>
+            <option value="high">High (&ge; 85%)</option>
+            <option value="review">Review Needed (&lt; 85%)</option>
+          </select>
+
+          {/* Sort By */}
+          <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="newest">Sort: Newest First</option>
+            <option value="oldest">Sort: Oldest First</option>
+            <option value="confidence">Sort: Confidence Score</option>
+            <option value="applicant">Sort: Applicant Name</option>
+          </select>
+
+          {/* Clear Filters Button */}
+          {hasActiveFilters && (
+            <button className="button button-danger" style={{ minHeight: 38, padding: "0 12px", fontSize: 10 }} onClick={clearAllFilters}>
+              <X size={13} /> Clear filters
+            </button>
+          )}
+
+          {/* View Switcher */}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+            <button
+              className={`button ${viewMode === "table" ? "button-primary" : "button-ghost"}`}
+              style={{ minHeight: 38, padding: "0 10px" }}
+              onClick={() => setViewMode("table")}
+              title="Table View"
+            >
+              <ListFilter size={15} /> Table
+            </button>
+            <button
+              className={`button ${viewMode === "grid" ? "button-primary" : "button-ghost"}`}
+              style={{ minHeight: 38, padding: "0 10px" }}
+              onClick={() => setViewMode("grid")}
+              title="Grid View"
+            >
+              <Layers size={15} /> Grid
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Summary & Counter */}
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e0e4df", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 9, color: "var(--muted)" }}>
+          <div>
+            Showing <strong style={{ color: "var(--forest)", fontSize: 11 }}>{filteredRecords.length}</strong> of {recordsList.length} property records
+            {hasActiveFilters && <span style={{ marginLeft: 8, color: "#856404", background: "#fff3cd", padding: "2px 6px", borderRadius: 4 }}>Filters applied</span>}
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <span><BadgeCheck size={11} style={{ verticalAlign: -2, color: "#28a745" }} /> 5 Positive</span>
+            <span><AlertTriangle size={11} style={{ verticalAlign: -2, color: "#ffc107" }} /> 2 Referrals</span>
+            <span><Clock size={11} style={{ verticalAlign: -2, color: "#17a2b8" }} /> 1 Pending</span>
+          </div>
+        </div>
+      </div>
+
+      {/* TABLE VIEW */}
+      {viewMode === "table" && (
+        <div className="records-table-wrap">
+          <table className="records-table">
+            <thead>
+              <tr>
+                <th>Case ID</th>
+                <th>Applicant / Holder</th>
+                <th>Property & Khasra</th>
+                <th>Location & State</th>
+                <th>Document Type</th>
+                <th>OCR Confidence</th>
+                <th>Verification Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRecords.length > 0 ? (
+                filteredRecords.map((rec) => (
+                  <tr key={rec.id}>
+                    <td>
+                      <strong style={{ font: "11px var(--font-geist-mono)" }}>{rec.id}</strong>
+                      <span>{rec.date}</span>
+                    </td>
+                    <td>
+                      <strong style={{ fontSize: 11 }}>{rec.applicant}</strong>
+                      {rec.hasHandwritingReview && <span style={{ color: "#c3773e" }}><AlertTriangle size={9} /> Handwriting review</span>}
+                    </td>
+                    <td>
+                      <strong>{rec.property}</strong>
+                      <span>Khasra: {rec.khasra}</span>
+                    </td>
+                    <td>
+                      <span>{rec.village}, {rec.tehsil}</span>
+                      <strong>{rec.district}, {rec.state}</strong>
+                    </td>
+                    <td>
+                      <span className="doc-type-badge">{rec.docType}</span>
+                    </td>
+                    <td>
+                      <strong style={{ color: rec.confidence < 75 ? "#b04435" : rec.confidence < 90 ? "#a06a09" : "#27764a" }}>
+                        {rec.confidence.toFixed(1)}%
+                      </strong>
+                    </td>
+                    <td>
+                      <ResultBadge status={rec.status === "pending" ? "refer" : rec.status} compact />
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="button button-primary" style={{ minHeight: 28, padding: "0 9px", fontSize: 9 }} onClick={() => onNavigate(rec.id === "OCR-AJAI-ATS" ? "scan" : "verification")}>
+                          Open Case
+                        </button>
+                        <button className="button button-ghost" style={{ minHeight: 28, padding: "0 9px", fontSize: 9 }} onClick={() => onNavigate("map")}>
+                          Map
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: 40 }}>
+                    <div style={{ color: "var(--muted)" }}>
+                      <Search size={28} style={{ marginBottom: 8, opacity: 0.5 }} />
+                      <strong style={{ display: "block", fontSize: 13, color: "var(--ink)" }}>No property records matched your filters</strong>
+                      <span style={{ display: "block", fontSize: 10, marginTop: 4 }}>Try clearing search parameters or state filters.</span>
+                      <button className="button button-primary" style={{ marginTop: 14 }} onClick={clearAllFilters}>
+                        Reset all filters
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* GRID VIEW */}
+      {viewMode === "grid" && (
+        <div className="utility-grid">
+          {filteredRecords.length > 0 ? (
+            filteredRecords.map((rec) => (
+              <article className="utility-card" key={rec.id} style={{ position: "relative" }}>
+                <div style={{ display: "flex", justify: "space-between", alignItems: "center" }}>
+                  <span>{rec.state} · {rec.docType}</span>
+                  <ResultBadge status={rec.status === "pending" ? "refer" : rec.status} compact />
+                </div>
+                <h2>{rec.id}</h2>
+                <strong style={{ fontSize: 13, marginBottom: 4 }}>{rec.applicant}</strong>
+                <p>{rec.property} · {rec.village}, {rec.district}</p>
+                <div style={{ marginTop: 10, fontSize: 9, color: "var(--muted)" }}>
+                  OCR Confidence: <strong style={{ color: rec.confidence < 75 ? "#b04435" : "var(--forest)" }}>{rec.confidence}%</strong>
+                </div>
+                <div>
+                  <button className="button button-primary" onClick={() => onNavigate(rec.id === "OCR-AJAI-ATS" ? "scan" : "verification")}>
+                    Open case
+                  </button>
+                  <button className="button button-ghost" onClick={() => onNavigate("map")}>
+                    View map
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 50, background: "#fff", borderRadius: 8, border: "1px solid #d1d6d0" }}>
+              <Search size={32} style={{ marginBottom: 10, opacity: 0.4 }} />
+              <h3>No matching property records</h3>
+              <p style={{ color: "var(--muted)", fontSize: 10 }}>Try modifying your filter settings.</p>
+              <button className="button button-primary" style={{ marginTop: 12 }} onClick={clearAllFilters}>
+                Clear filters
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UtilityWorkspace({ view, onNavigate }: { view: Exclude<View, "dashboard" | "verification" | "scan" | "map" | "records">; onNavigate: (view: View) => void }) {
   const [preferences, setPreferences] = useState({ autoSave: true, confidenceReview: true, compactRows: false });
   const content = {
-    records: {
-      eyebrow: "Evidence register",
-      title: "Property records",
-      intro: "Open a case source, continue its verification, or inspect the mapped parcel.",
-    },
     processing: {
       eyebrow: "Live operations",
       title: "Processing queue",
@@ -1676,9 +2560,6 @@ function UtilityWorkspace({ view, onNavigate }: { view: Exclude<View, "verificat
   return (
     <section className="utility-workspace" aria-labelledby="utility-title">
       <header className="utility-header"><div className="eyebrow">{content.eyebrow}</div><h1 id="utility-title">{content.title}</h1><p>{content.intro}</p></header>
-      {view === "records" && <div className="utility-grid">
-        {["SHFL0021847", "OCR-AJAI-ATS", "PV-2026-0412"].map((id, index) => <article className="utility-card" key={id}><span>{index === 1 ? "Uploaded OCR" : "Verification case"}</span><h2>{id}</h2><p>{index === 1 ? "Ajai ATS · Hindi property agreement" : index === 0 ? "Meera Sharma · Khasra 214/3" : "Registry review awaiting documents"}</p><div><button className="button button-primary" onClick={() => onNavigate(index === 1 ? "scan" : "verification")}>Open case</button><button className="button button-ghost" onClick={() => onNavigate("map")}>View map</button></div></article>)}
-      </div>}
       {view === "processing" && <div className="queue-list">
         {[['OCR-AJAI-ATS','OCR complete','100%'],['SHFL0021847','Sources compared','100%'],['PV-2026-0412','Waiting for upload','0%']].map(([id,label,value]) => <article key={id}><div><span>{id}</span><strong>{label}</strong></div><div className="queue-progress"><i style={{ width: value }} /></div><b>{value}</b><button className="button button-ghost" onClick={() => onNavigate(id === 'OCR-AJAI-ATS' ? 'scan' : 'verification')}>Open</button></article>)}
       </div>}
@@ -1714,7 +2595,7 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("verification");
+  const [view, setView] = useState<View>("dashboard");
   const [viewRestored, setViewRestored] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -1722,7 +2603,7 @@ export default function Home() {
   useEffect(() => {
     const savedView = window.localStorage.getItem("sitaara-active-view");
     queueMicrotask(() => {
-    if (["verification", "scan", "map", "records", "processing", "preferences", "help"].includes(savedView ?? "")) setView(savedView as View);
+      if (["dashboard", "verification", "scan", "map", "records", "processing", "preferences", "help"].includes(savedView ?? "")) setView(savedView as View);
       setViewRestored(true);
     });
   }, []);
@@ -1736,14 +2617,15 @@ export default function Home() {
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="sidebar-brand"><BrandMark /><div><strong>Sitaara Verify</strong><span>Property intelligence</span></div></div>
         <nav aria-label="Primary navigation">
-          <button className={view === "verification" ? "active" : ""} onClick={() => { setView("verification"); setMenuOpen(false); }}><LayoutDashboard size={18} /><span>Verification</span><ChevronRight size={14} /></button>
+          <button className={view === "dashboard" ? "active" : ""} onClick={() => { setView("dashboard"); setMenuOpen(false); }}><LayoutDashboard size={18} /><span>Dashboard</span></button>
+          <button className={view === "verification" ? "active" : ""} onClick={() => { setView("verification"); setMenuOpen(false); }}><ShieldCheck size={18} /><span>Verification</span><ChevronRight size={14} /></button>
           <button className={view === "scan" ? "active" : ""} onClick={() => { setView("scan"); setMenuOpen(false); }}><ScanLine size={18} /><span>Document lab</span><ChevronRight size={14} /></button>
           <button className={view === "map" ? "active" : ""} onClick={() => { setView("map"); setMenuOpen(false); }}><MapPinned size={18} /><span>Plot map</span><ChevronRight size={14} /></button>
           <button className={view === "records" ? "active" : ""} onClick={() => { setView("records"); setMenuOpen(false); }}><BookOpen size={18} /><span>Records</span><b>24</b></button>
         </nav>
         <div className="sidebar-rule" />
         <nav aria-label="Secondary navigation">
-          <button className={view === "processing" ? "active" : ""} onClick={() => { setView("processing"); setMenuOpen(false); }}><WandSparkles size={18} /><span>Processing</span><b>3</b></button>
+          <button className={view === "processing" ? "active" : ""} onClick={() => { setView("processing"); setMenuOpen(false); }}><WandSparkles size={18} /><span>Processing</span><b>6</b></button>
           <button className={view === "preferences" ? "active" : ""} onClick={() => { setView("preferences"); setMenuOpen(false); }}><Settings size={18} /><span>Preferences</span></button>
           <button className={view === "help" ? "active" : ""} onClick={() => { setView("help"); setMenuOpen(false); }}><CircleHelp size={18} /><span>Help center</span></button>
         </nav>
@@ -1758,10 +2640,23 @@ export default function Home() {
 
       <div className="main-panel">
         <div className="mobile-topbar"><button onClick={() => setMenuOpen((value) => !value)} aria-label="Open menu"><Menu /></button><div><BrandMark /><strong>Sitaara Verify</strong></div><button onClick={() => setUpgradeOpen(true)}><Sparkles size={17} /></button></div>
-        {view === "verification" ? <VerificationWorkspace onOpenDocumentLab={() => setView("scan")} onOpenMap={() => setView("map")} onOpenRecords={() => setView("records")} /> : view === "scan" ? <ScanWorkspace onNavigateMap={() => setView("map")} /> : view === "map" ? <MapWorkspace /> : <UtilityWorkspace view={view} onNavigate={setView} />}
+        {view === "dashboard" ? (
+          <DashboardWorkspace onNavigate={setView} />
+        ) : view === "records" ? (
+          <RecordsWorkspace onNavigate={setView} />
+        ) : view === "verification" ? (
+          <VerificationWorkspace onOpenDocumentLab={() => setView("scan")} onOpenMap={() => setView("map")} onOpenRecords={() => setView("records")} />
+        ) : view === "scan" ? (
+          <ScanWorkspace onNavigateMap={() => setView("map")} />
+        ) : view === "map" ? (
+          <MapWorkspace />
+        ) : (
+          <UtilityWorkspace view={view} onNavigate={setView} />
+        )}
       </div>
       {menuOpen && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
       {upgradeOpen && <UpgradeModal onClose={() => setUpgradeOpen(false)} />}
     </main>
   );
 }
+
