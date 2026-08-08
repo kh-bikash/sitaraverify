@@ -2501,7 +2501,7 @@ function RecordsWorkspace({ onNavigate }: { onNavigate: (view: View) => void }) 
           {filteredRecords.length > 0 ? (
             filteredRecords.map((rec) => (
               <article className="utility-card" key={rec.id} style={{ position: "relative" }}>
-                <div style={{ display: "flex", justify: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span>{rec.state} · {rec.docType}</span>
                   <ResultBadge status={rec.status === "pending" ? "refer" : rec.status} compact />
                 </div>
