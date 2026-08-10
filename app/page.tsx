@@ -2615,9 +2615,9 @@ function DashboardWorkspace({
   const [formVillage, setFormVillage] = useState("");
   const [formTehsil, setFormTehsil] = useState("");
   const [formDistrict, setFormDistrict] = useState("");
-  const [formState, setFormState] = useState("UP");
-  const [formDocType, setFormDocType] = useState("Sale Deed");
-  const [formStatus, setFormStatus] = useState("pending");
+  const [formState, setFormState] = useState<RecordItem["state"]>("UP");
+  const [formDocType, setFormDocType] = useState<RecordItem["docType"]>("Sale Deed");
+  const [formStatus, setFormStatus] = useState<RecordItem["status"]>("pending");
   const [formConfidence, setFormConfidence] = useState(98.0);
 
   useEffect(() => {
@@ -2665,7 +2665,7 @@ function DashboardWorkspace({
       district: formDistrict || "Varanasi",
       state: formState,
       docType: formDocType,
-      status: formStatus as RecordStatus,
+      status: formStatus,
       confidence: Number(formConfidence) || 98.0,
       date: editingRecord ? editingRecord.date : new Date().toISOString().split('T')[0],
       hasHandwritingReview: false
@@ -3204,14 +3204,20 @@ function DashboardWorkspace({
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", fontSize: "10px", fontWeight: "600", color: "var(--ink)", gap: "4px" }}>
                   State
-                  <input value={formState} onChange={(e) => setFormState(e.target.value)} placeholder="e.g. UP" style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }} />
+                  <select value={formState} onChange={(e) => setFormState(e.target.value as RecordItem["state"])} style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }}>
+                    <option value="UP">UP (Uttar Pradesh)</option>
+                    <option value="KA">KA (Karnataka)</option>
+                    <option value="MH">MH (Maharashtra)</option>
+                    <option value="DL">DL (Delhi NCR)</option>
+                    <option value="HR">HR (Haryana)</option>
+                  </select>
                 </label>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                 <label style={{ display: "flex", flexDirection: "column", fontSize: "10px", fontWeight: "600", color: "var(--ink)", gap: "4px" }}>
                   Document Type
-                  <select value={formDocType} onChange={(e) => setFormDocType(e.target.value)} style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }}>
+                  <select value={formDocType} onChange={(e) => setFormDocType(e.target.value as RecordItem["docType"])} style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }}>
                     <option value="Sale Deed">Sale Deed</option>
                     <option value="Khatauni / RTC">Khatauni / RTC</option>
                     <option value="Mutation Order">Mutation Order</option>
@@ -3220,7 +3226,7 @@ function DashboardWorkspace({
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", fontSize: "10px", fontWeight: "600", color: "var(--ink)", gap: "4px" }}>
                   Verification Status
-                  <select value={formStatus} onChange={(e) => setFormStatus(e.target.value)} style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }}>
+                  <select value={formStatus} onChange={(e) => setFormStatus(e.target.value as RecordItem["status"])} style={{ padding: "8px", border: "1px solid #cbd0ca", borderRadius: "4px", fontSize: "11px", background: "#fff", color: "var(--ink)" }}>
                     <option value="positive">Positive (Approved)</option>
                     <option value="refer">Refer (Review Required)</option>
                     <option value="pending">Pending Review</option>
