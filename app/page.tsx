@@ -146,10 +146,10 @@ async function removeLocalDocument() {
 }
 
 const starterCorners: Corner[] = [
-  [25.26420, 82.87480],
-  [25.26440, 82.87560],
-  [25.26390, 82.87580],
-  [25.26370, 82.87500],
+  [25.26567, 82.87857],
+  [25.26565, 82.87941],
+  [25.26500, 82.87939],
+  [25.26504, 82.87850],
 ];
 
 const calculatePolygonArea = (coords: Corner[]): { areaSqFt: number; perimeterMeters: number } => {
@@ -203,67 +203,75 @@ const calculatePolygonArea = (coords: Corner[]): { areaSqFt: number; perimeterMe
 const meeraSharmaOcrResult: OcrResult = {
   filename: "Meera_Sharma_SaleDeed.pdf",
   engine: "Gemini 3.5 Flash",
-  language: "English / Hindi",
+  language: "Hindi / Devanagari",
   warning: null,
   elapsed_seconds: 1.8,
   confidence: 0.98,
-  line_count: 13,
-  layout_block_count: 4,
+  line_count: 17,
+  layout_block_count: 6,
   table_count: 0,
   fields: [
-    { label: "Deed Type", value: "Sale Deed", type: "deed_type", confidence: 0.99 },
-    { label: "Seller Name", value: "Rakesh Kumar Sharma", type: "seller", confidence: 0.98 },
-    { label: "Buyer Name", value: "Meera Sharma", type: "buyer", confidence: 0.99 },
-    { label: "Khasra Number", value: "214/3", type: "khasra", confidence: 0.98 },
-    { label: "Village", value: "Bhadaini", type: "village", confidence: 0.99 },
-    { label: "Tehsil", value: "Sadar", type: "tehsil", confidence: 0.98 },
-    { label: "District", value: "Varanasi", type: "district", confidence: 0.99 },
-    { label: "State", value: "UP", type: "state", confidence: 0.99 },
-    { label: "Property Area", value: "52,700 sq.ft", type: "area", confidence: 0.97 },
-    { label: "Boundaries", value: "E: House 214/4, W: 18 ft municipal lane, N: Sharma house, S: vacant plot", type: "boundary", confidence: 0.95 }
+    { label: "Deed Type", value: "विक्रय अनुबन्ध पत्र (Sale Agreement)", type: "deed_type", confidence: 0.99 },
+    { label: "Consideration Amount", value: "₹ 40,00,000/- (चालीस लाख रुपये मात्र)", type: "amount", confidence: 0.98 },
+    { label: "Advance Amount", value: "₹ 20,00,000/- (बीस लाख रुपये मात्र)", type: "amount", confidence: 0.98 },
+    { label: "Stamp Duty", value: "₹ 100/-", type: "stamp_duty", confidence: 0.99 },
+    { label: "Seller Name", value: "राकेश कुमार शर्मा पुत्र स्वर्गीय गोपाल शर्मा", type: "seller", confidence: 0.98 },
+    { label: "Buyer Name", value: "मीरा शर्मा पत्नी राकेश कुमार शर्मा", type: "buyer", confidence: 0.99 },
+    { label: "Khasra / Plot Number", value: "214/3", type: "khasra", confidence: 0.98 },
+    { label: "Village / Mauza", value: "भदैनी (Bhadaini)", type: "village", confidence: 0.99 },
+    { label: "Tehsil", value: "सदर (Sadar)", type: "tehsil", confidence: 0.98 },
+    { label: "District", value: "वाराणसी (Varanasi)", type: "district", confidence: 0.99 },
+    { label: "State", value: "उत्तर प्रदेश (UP)", type: "state", confidence: 0.99 },
+    { label: "Property Area", value: "52,700 वर्ग फुट (4,900 वर्ग मीटर)", type: "area", confidence: 0.97 },
+    { label: "Boundaries (चौहद्दी)", value: "पूर्व: आराजी 214/4 | पश्चिम: 18 फीट मार्ग | उत्तर: शर्मा निवास | दक्षिण: खाली भूखंड", type: "boundary", confidence: 0.95 }
   ],
-  text: `DEED OF SALE\n\nSeller: Rakesh Kumar Sharma s/o Late Gopal Sharma\nBuyer: Meera Sharma w/o Rakesh Kumar Sharma\nProperty: Khasra 214/3, Bhadaini, Sadar, Varanasi, UP\nArea: 52,700 sq.ft (4,900 sq.m) - Agricultural Use\n\nBOUNDARIES:\nEast: House 214/4\nWest: 18 ft municipal lane\nNorth: Sharma house\nSouth: vacant plot`,
+  text: `भारत INDIA\nसत्यमेव जयते\nएक सौ रुपये RS. 100\nउत्तर प्रदेश UTTAR PRADESH\nSerial No: UP-B04128597\n\nविक्रय अनुबन्ध पत्र\n\nविक्रय मूल्य : ₹ 40,00,000/- (चालीस लाख रुपये मात्र)\nअग्रिम राशि : ₹ 20,00,000/- (बीस लाख रुपये मात्र)\nस्टाम्प शुल्क : ₹ 100/-\n\nप्रथम पक्ष (विक्रेता): राकेश कुमार शर्मा पुत्र स्वर्गीय गोपाल शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।\n\nद्वितीय पक्ष (क्रेता): मीरा शर्मा पत्नी राकेश कुमार शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।\n\nसंपत्ति विवरण: भूखंड संख्या 214/3, क्षेत्रफल 52,700 वर्ग फुट (4,900 वर्ग मीटर), मौजा भदैनी, परगना देहात अमानत, तहसील सदर, जिला वाराणसी।\n\nचौहद्दी (सीमाएं):\nपूर्व: आराजी नंबर 214/4 (शर्मा जी का मकान)\nपश्चिम: 18 फीट चौड़ा नगर निगम मार्ग\nउत्तर: शर्मा परिवार का निजी निवास\nदक्षिण: खाली आवासीय भूखंड\n\nSUB-REGISTRAR VARANASI · पंजीकरण संख्या: 2026/0412`,
   pages: [
     {
       page: 1,
       width: 1000,
       height: 1414,
       confidence: 0.98,
-      text: `DEED OF SALE\n\nSeller: Rakesh Kumar Sharma s/o Late Gopal Sharma\nBuyer: Meera Sharma w/o Rakesh Kumar Sharma\nProperty: Khasra 214/3, Bhadaini, Sadar, Varanasi, UP\nArea: 52,700 sq.ft (4,900 sq.m) - Agricultural Use\n\nBOUNDARIES:\nEast: House 214/4\nWest: 18 ft municipal lane\nNorth: Sharma house\nSouth: vacant plot`,
+      text: `भारत INDIA\nसत्यमेव जयते\nएक सौ रुपये RS. 100\nउत्तर प्रदेश UTTAR PRADESH\nSerial No: UP-B04128597\n\nविक्रय अनुबन्ध पत्र\n\nविक्रय मूल्य : ₹ 40,00,000/- (चालीस लाख रुपये मात्र)\nअग्रिम राशि : ₹ 20,00,000/- (बीस लाख रुपये मात्र)\nस्टाम्प शुल्क : ₹ 100/-\n\nप्रथम पक्ष (विक्रेता): राकेश कुमार शर्मा पुत्र स्वर्गीय गोपाल शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।\n\nद्वितीय पक्ष (क्रेता): मीरा शर्मा पत्नी राकेश कुमार शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।\n\nसंपत्ति विवरण: भूखंड संख्या 214/3, क्षेत्रफल 52,700 वर्ग फुट (4,900 वर्ग मीटर), मौजा भदैनी, परगना देहात अमानत, तहसील सदर, जिला वाराणसी।\n\nचौहद्दी (सीमाएं):\nपूर्व: आराजी नंबर 214/4 (शर्मा जी का मकान)\nपश्चिम: 18 फीट चौड़ा नगर निगम मार्ग\nउत्तर: शर्मा परिवार का निजी निवास\nदक्षिण: खाली आवासीय भूखंड\n\nSUB-REGISTRAR VARANASI · पंजीकरण संख्या: 2026/0412`,
       lines: [
-        { text: "DEED OF SALE", confidence: 0.99, box: [100, 80, 900, 120] },
-        { text: "This Deed of Sale is executed at Varanasi, Uttar Pradesh.", confidence: 0.98, box: [100, 140, 900, 170] },
-        { text: "SELLER: Rakesh Kumar Sharma s/o Late Gopal Sharma", confidence: 0.98, box: [100, 200, 900, 230] },
-        { text: "BUYER: Meera Sharma w/o Rakesh Kumar Sharma", confidence: 0.99, box: [100, 260, 900, 290] },
-        { text: "PROPERTY: Khasra / Plot Number 214/3", confidence: 0.98, box: [100, 320, 900, 350] },
-        { text: "LOCATION: Village Bhadaini, Tehsil Sadar, District Varanasi, UP", confidence: 0.99, box: [100, 380, 900, 410] },
-        { text: "TOTAL AREA: 52,700 sq.ft (4,900 sq.m) - Agricultural land", confidence: 0.97, box: [100, 440, 900, 470] },
-        { text: "BOUNDARIES:", confidence: 0.99, box: [100, 500, 900, 530] },
-        { text: "East: Adjoining House 214/4 (Sharma property)", confidence: 0.96, box: [100, 560, 900, 590] },
-        { text: "West: 18 feet municipal lane", confidence: 0.95, box: [100, 620, 900, 650] },
-        { text: "North: Sharma family residence", confidence: 0.97, box: [100, 680, 900, 710] },
-        { text: "South: Vacant residential plot", confidence: 0.96, box: [100, 740, 900, 770] },
-        { text: "IN WITNESS WHEREOF the parties have signed this deed.", confidence: 0.98, box: [100, 820, 900, 850] }
+        { text: "भारत INDIA  ·  सत्यमेव जयते  ·  एक सौ रुपये RS. 100", confidence: 0.99, box: [100, 40, 900, 70] },
+        { text: "उत्तर प्रदेश UTTAR PRADESH  ·  Serial No: UP-B04128597", confidence: 0.98, box: [100, 75, 900, 105] },
+        { text: "विक्रय अनुबन्ध पत्र", confidence: 0.99, box: [100, 130, 900, 160] },
+        { text: "विक्रय मूल्य : ₹ 40,00,000/- (चालीस लाख रुपये मात्र)", confidence: 0.98, box: [100, 185, 900, 215] },
+        { text: "अग्रिम राशि : ₹ 20,00,000/- (बीस लाख रुपये मात्र)", confidence: 0.98, box: [100, 225, 900, 255] },
+        { text: "स्टाम्प शुल्क : ₹ 100/-", confidence: 0.99, box: [100, 265, 900, 295] },
+        { text: "प्रथम पक्ष (विक्रेता): राकेश कुमार शर्मा पुत्र स्वर्गीय गोपाल शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।", confidence: 0.98, box: [100, 320, 900, 360] },
+        { text: "द्वितीय पक्ष (क्रेता): मीरा शर्मा पत्नी राकेश कुमार शर्मा निवासी: भदैनी, सदर, वाराणसी, उत्तर प्रदेश।", confidence: 0.99, box: [100, 380, 900, 420] },
+        { text: "संपत्ति विवरण: भूखंड संख्या 214/3, क्षेत्रफल 52,700 वर्ग फुट (4,900 वर्ग मीटर), मौजा भदैनी, परगना देहात अमानत, तहसील सदर, जिला वाराणसी।", confidence: 0.97, box: [100, 440, 900, 490] },
+        { text: "चौहद्दी (सीमाएं):", confidence: 0.99, box: [100, 510, 900, 535] },
+        { text: "पूर्व: आराजी नंबर 214/4 (शर्मा जी का मकान)", confidence: 0.97, box: [100, 545, 900, 570] },
+        { text: "पश्चिम: 18 फीट चौड़ा नगर निगम मार्ग", confidence: 0.96, box: [100, 580, 900, 605] },
+        { text: "उत्तर: शर्मा परिवार का निजी निवास", confidence: 0.97, box: [100, 615, 900, 640] },
+        { text: "दक्षिण: खाली आवासीय भूखंड", confidence: 0.96, box: [100, 650, 900, 675] },
+        { text: "SUB-REGISTRAR VARANASI", confidence: 0.95, box: [700, 720, 900, 760] },
+        { text: "पंजीकरण संख्या: 2026/0412", confidence: 0.98, box: [100, 760, 400, 790] }
       ],
       layout_blocks: [
-        { label: "header", content: "DEED OF SALE", box: [100, 80, 900, 120], order: 1 },
-        { label: "parties", content: "Seller: Rakesh Kumar Sharma\nBuyer: Meera Sharma", box: [100, 200, 900, 290], order: 2 },
-        { label: "property", content: "Khasra 214/3, Bhadaini, Sadar, Varanasi, UP\nArea: 52,700 sq.ft", box: [100, 320, 900, 470], order: 3 },
-        { label: "boundaries", content: "East: House 214/4\nWest: 18 ft lane\nNorth: Sharma house\nSouth: vacant plot", box: [100, 500, 900, 770], order: 4 }
+        { label: "stamp_header", content: "भारत INDIA\nएक सौ रुपये RS. 100\nउत्तर प्रदेश UTTAR PRADESH\nSerial No: UP-B04128597", box: [100, 40, 900, 105], order: 1 },
+        { label: "title", content: "विक्रय अनुबन्ध पत्र", box: [100, 130, 900, 160], order: 2 },
+        { label: "financials", content: "विक्रय मूल्य : ₹ 40,00,000/-\nअग्रिम राशि : ₹ 20,00,000/-\nस्टाम्प शुल्क : ₹ 100/-", box: [100, 185, 900, 295], order: 3 },
+        { label: "parties", content: "प्रथम पक्ष (विक्रेता): राकेश कुमार शर्मा\nद्वितीय पक्ष (क्रेता): मीरा शर्मा", box: [100, 320, 900, 420], order: 4 },
+        { label: "property", content: "भूखंड संख्या 214/3, क्षेत्रफल 52,700 वर्ग फुट (4,900 वर्ग मीटर), मौजा भदैनी, वाराणसी", box: [100, 440, 900, 490], order: 5 },
+        { label: "boundaries", content: "पूर्व: आराजी नंबर 214/4\nपश्चिम: 18 फीट मार्ग\nउत्तर: शर्मा निवास\nदक्षिण: खाली भूखंड", box: [100, 510, 900, 675], order: 6 }
       ]
     }
   ]
 };
 
 const createRecordFromOcr = (result: OcrResult, filename: string): RecordItem => {
-  const applicant = result.fields.find(f => f.label.toLowerCase().includes("buyer") || f.label.toLowerCase().includes("applicant"))?.value || "Unknown Applicant";
-  const khasra = result.fields.find(f => f.label.toLowerCase().includes("khasra") || f.label.toLowerCase().includes("survey"))?.value || "Plot 214/3";
-  const village = result.fields.find(f => f.label.toLowerCase().includes("village"))?.value || "Bhadaini";
+  const applicant = result.fields.find(f => f.label.toLowerCase().includes("buyer") || f.label.toLowerCase().includes("applicant"))?.value || "मीरा शर्मा";
+  const khasra = result.fields.find(f => f.label.toLowerCase().includes("khasra") || f.label.toLowerCase().includes("survey") || f.label.toLowerCase().includes("plot"))?.value || "214/3";
+  const village = result.fields.find(f => f.label.toLowerCase().includes("village") || f.label.toLowerCase().includes("mauza"))?.value || "Bhadaini";
   const tehsil = result.fields.find(f => f.label.toLowerCase().includes("tehsil"))?.value || "Sadar";
   const district = result.fields.find(f => f.label.toLowerCase().includes("district"))?.value || "Varanasi";
   const stateVal = result.fields.find(f => f.label.toLowerCase().includes("state"))?.value || "UP";
   const docTypeVal = result.fields.find(f => f.label.toLowerCase().includes("deed") || f.label.toLowerCase().includes("type"))?.value || "Sale Deed";
-  const area = result.fields.find(f => f.label.toLowerCase().includes("area"))?.value || "1,856 sq.ft";
+  const area = result.fields.find(f => f.label.toLowerCase().includes("area"))?.value || "52,700 sq.ft";
 
   const state = ["UP", "KA", "MH", "DL", "HR"].includes(stateVal) ? stateVal : "UP";
   const docType = ["Sale Deed", "Khatauni / RTC", "Mutation Order", "Cadastral Map"].includes(docTypeVal) ? docTypeVal : "Sale Deed";
@@ -1059,7 +1067,7 @@ function VerificationWorkspace({
 
       {activeDetail === "evidence" && (
         <div className="evidence-grid">
-          <div className="evidence-map-card"><div className="evidence-card-head"><div><h2>Parcel evidence</h2><p>Khasra/Survey {activeRecord.khasra} · cadastral boundary aligned to the basemap.</p></div><span>±2.4 m overlay estimate</span></div><div className="evidence-map"><ParcelMap opacity={0.42} corners={activeRecord.id === "SHFL0021847" ? starterCorners : [[13.0762, 77.6083], [13.0765, 77.6101], [13.0751, 77.6105], [13.0748, 77.6087]]} onCornerChange={() => undefined} surveyNumber={activeRecord.khasra} /></div></div>
+          <div className="evidence-map-card"><div className="evidence-card-head"><div><h2>Parcel evidence</h2><p>Khasra/Survey {activeRecord.khasra} · cadastral boundary aligned to the basemap.</p></div><span>±2.4 m overlay estimate</span></div><div className="evidence-map"><ParcelMap opacity={0.42} corners={activeRecord.id === "SHFL0021847" ? starterCorners : [[13.0762, 77.6083], [13.0765, 77.6101], [13.0751, 77.6105], [13.0748, 77.6087]]} basemap="satellite" onCornerChange={() => undefined} surveyNumber={activeRecord.khasra} areaSqFt={activeRecord.id === "SHFL0021847" ? 52700 : 61850} /></div></div>
           <div className="evidence-list"><h2>Coordinate chain</h2><div><span>01</span><p><strong>Portal centroid</strong><small>{activeRecord.id === "SHFL0021847" ? "25.287310° N, 82.973840° E" : "13.075500° N, 77.609400° E"}</small></p><Check size={15} /></div><div><span>02</span><p><strong>Technical visit GPS</strong><small>25.5 m deviation · within tolerance</small></p><Check size={15} /></div><div><span>03</span><p><strong>Ground evidence</strong><small>9 photos within a 30 m radius</small></p><Check size={15} /></div></div>
         </div>
       )}
@@ -1241,12 +1249,12 @@ function ScanWorkspace({ onNavigate, onAddRecord }: { onNavigate: (view: View) =
       let reply = "I'm analyzing the document details. Could you please specify which section you are referring to?";
       if (q.includes("owner") || q.includes("holder") || q.includes("who is")) {
         const ownerField = ocrResult?.fields.find(f => f.label.toLowerCase().includes("buyer") || f.label.toLowerCase().includes("applicant") || f.label.toLowerCase().includes("seller"));
-        reply = ownerField ? `The buyer/recorded holder extracted from the document is: "${ownerField.value}".` : "The recorded owner extracted is Meera Sharma (buyer) and Rakesh Kumar Sharma (seller).";
+        reply = ownerField ? `The buyer/recorded holder extracted from the document is: "${ownerField.value}".` : "The recorded owner extracted is Meera Sharma (मीरा शर्मा, buyer) and Rakesh Kumar Sharma (राकेश कुमार शर्मा, seller).";
       } else if (q.includes("survey") || q.includes("khasra") || q.includes("size") || q.includes("area")) {
         const khasraField = ocrResult?.fields.find(f => f.label.toLowerCase().includes("khasra") || f.label.toLowerCase().includes("survey"));
-        reply = `The Survey/Khasra number is "${khasraField?.value || "214/3"}" and the area recorded is "1,856 sq.ft".`;
+        reply = `The Survey/Khasra number is "${khasraField?.value || "214/3"}" and the total area is "52,700 sq.ft (4,900 sq.m)".`;
       } else if (q.includes("boundary") || q.includes("boundaries")) {
-        reply = "The boundaries mentioned in the deed are:\n- East: House 214/4\n- West: 18 ft municipal lane\n- North: Sharma house\n- South: vacant plot";
+        reply = "The boundaries (चौहद्दी) in the deed are:\n- पूर्व (East): आराजी 214/4 (शर्मा जी का मकान)\n- पश्चिम (West): 18 फीट चौड़ा नगर निगम मार्ग\n- उत्तर (North): शर्मा परिवार का निजी निवास\n- दक्षिण (South): खाली आवासीय भूखंड";
       } else if (q.includes("risk") || q.includes("hazard")) {
         reply = "Key risk detected: The West boundary municipal lane width is recorded as 18 ft in the Deed, but 20 ft on the government UP Bhulekh portal. This is a 2 ft variance (Hold recommendation).";
       } else if (q.includes("hello") || q.includes("hi")) {
@@ -1878,7 +1886,7 @@ function ParcelMap({
 
 
 const CASE_COORDINATES: Record<string, Corner[]> = {
-  "SHFL0021847": [[25.26440, 82.87490], [25.26440, 82.87563], [25.26377, 82.87563], [25.26377, 82.87490]], // Varanasi Bhadaini 52,700 sq.ft
+  "SHFL0021847": [[25.26567, 82.87857], [25.26565, 82.87941], [25.26500, 82.87939], [25.26504, 82.87850]], // Varanasi Bhadaini clear field boundary
   "OCR-AJAI-ATS": [[13.08084, 77.63265], [13.08084, 77.63335], [13.08016, 77.63335], [13.08016, 77.63265]], // Bengaluru Yelahanka 1.42 Acres (61,850 sq.ft)
   "PV-2026-0412": [[18.57871, 73.98575], [18.57871, 73.98725], [18.57729, 73.98725], [18.57729, 73.98575]], // Pune Wagholi 2.5 Hectares (269,100 sq.ft)
   "DL-REG-8821": [[28.53007, 77.14242], [28.53007, 77.14258], [28.52993, 77.14258], [28.52993, 77.14242]], // Delhi Vasant Kunj 2,400 sq.ft
@@ -2466,7 +2474,7 @@ const initialRecords: RecordItem[] = [
   {
     id: "SHFL0021847",
     applicant: "Meera Sharma",
-    property: "Khasra 214/3 · 1,856 sq.ft",
+    property: "Khasra 214/3 · 52,700 sq.ft",
     khasra: "214/3",
     village: "Bhadaini",
     tehsil: "Sadar",
@@ -2474,7 +2482,7 @@ const initialRecords: RecordItem[] = [
     state: "UP",
     docType: "Sale Deed",
     status: "refer",
-    confidence: 94.2,
+    confidence: 98.0,
     date: "2026-08-07",
     hasHandwritingReview: true,
   },

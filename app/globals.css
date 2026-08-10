@@ -421,10 +421,32 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(49, 93, 76, 
 .leaflet-container { font-family: var(--font-geist-sans), sans-serif; }
 .leaflet-control-attribution { font-size: 8px !important; background: rgba(255,255,255,.78) !important; }
 .leaflet-control-zoom a { color: var(--ink) !important; }
-.parcel-label { background: #202823 !important; border: 0 !important; color: #fff !important; font-size: 9px !important; font-weight: 650 !important; box-shadow: 0 5px 15px rgba(27,35,30,.3) !important; padding: 6px 9px !important; }
+.parcel-label { 
+  background: rgba(22, 28, 24, 0.94) !important; 
+  border: 1px solid rgba(223, 255, 109, 0.35) !important; 
+  border-radius: 6px !important;
+  color: #ffffff !important; 
+  font-size: 11px !important; 
+  font-weight: 700 !important; 
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) !important; 
+  padding: 6px 12px !important; 
+  letter-spacing: 0.02em !important;
+}
 .parcel-label:before { display: none !important; }
 .corner-marker { background: transparent; border: 0; }
-.corner-marker span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; border: 2px solid var(--acid); background: #29483c; color: #fff; font-size: 9px; font-weight: 800; box-shadow: 0 3px 9px rgba(28,40,34,.35); }
+.corner-marker span { 
+  width: 28px; 
+  height: 28px; 
+  display: grid; 
+  place-items: center; 
+  border-radius: 50%; 
+  border: 2px solid var(--acid); 
+  background: #233e33; 
+  color: #ffffff; 
+  font-size: 11px; 
+  font-weight: 800; 
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45); 
+}
 .map-floating-top { position: absolute; top: 15px; left: 15px; right: 15px; z-index: 500; display: flex; justify-content: space-between; pointer-events: none; }
 .map-floating-top div, .map-floating-top button { background: rgba(255,254,250,.92); border: 1px solid rgba(56,66,59,.18); box-shadow: 0 5px 14px rgba(34,40,36,.15); border-radius: 5px; min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 9px; font-weight: 650; backdrop-filter: blur(7px); }
 .map-floating-top button { width: 34px; padding: 0; justify-content: center; pointer-events: auto; cursor: pointer; }
